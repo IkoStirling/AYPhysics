@@ -1,5 +1,7 @@
 # AYPhysics Design
 
+> **变更记录（2026-07-09）**：Jolt 与确定性 Sim 物理双路径 — 见 [§8.3](#83-确定性与双物理路径)；总览见 [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md)。
+
 ## 1. 概述
 
 AYPhysics 是 AY Engine 的**物理子系统**，负责：
@@ -14,6 +16,7 @@ AYPhysics 是 AY Engine 的**物理子系统**，负责：
 - **2D/3D 混合**：2D 角色在 3D 世界中
 - **特效自研**：布料/毛发/流体/粒子不依赖物理引擎
 - **独立模块**：物理模块独立于 ECS
+- **双路径**：Jolt 负责丰富动力学（**非 lockstep**）；确定性碰撞子集（DET-07）供 Sim 轨 — 见 [§8.3](#83-确定性与双物理路径)
 
 ### 1.2 在引擎中的位置
 
@@ -608,6 +611,49 @@ DebugRenderer 输出线条/形状
 AYRenderer 渲染
 ```
 
+### 8.3 确定性与双物理路径
+
+> **权威文档**：[`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) §6  
+> **ECS 分轨**：[`AYEntity/design.md`](../AYEntity/design.md) §14 (`SystemLane`)
+
+本模块默认后端为 **Jolt**。Jolt 适合服务器权威、视觉物理、复杂刚体与关节；**不能**作为跨平台 lockstep / 输入回放的仿真后端（求解器顺序、浮点、多线程与架构差异会导致分歧）。
+
+#### 两条路径
+
+| 路径 | 后端 | `SystemLane` | 典型用途 |
+|------|------|--------------|----------|
+| **Physics-A（默认）** | Jolt `PhysicsWorld3D` | **Present** 或**仅服务器**权威 | 开放世界、布娃娃、载具、布料/毛发（视觉）、MMD 裙摆等 |
+| **Physics-B（Sim）** | 自研确定性子集（DET-07） | **Sim** | 帧同步、rollback、bit-exact 回放 |
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Present / Server-authoritative                         │
+│  PhysicsWorld3D (Jolt) → float Transform / 网络复制      │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│  Sim (lockstep active)                                  │
+│  DetBroadphase + Fixed AABB/sweep — 不调用 Jolt          │
+│  → SimTransformComponent → Bridge → float Transform      │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 硬性规则
+
+1. **`LockstepSession` 激活时**，Sim 轨 **禁止** 调用 `PhysicsWorld3D` / Jolt API。
+2. Jolt 结果若需参与多人玩法，走 **服务器权威 + 状态复制**（`AYNetwork`），而非各端本地 Jolt lockstep。
+3. `RigidBodyComponent` 与 Jolt 刚体同步属于 **Physics-A**；玩法位移/碰撞判定在 lockstep 产品中应优先使用 **Physics-B** 或 Sim 逻辑，避免「视觉刚体」与「仿真状态」混用同一 float 变换。
+4. 与 `AYAnimation` 的混合（§8.1）仅限 **表现**（动画驱动刚体位置）；lockstep 命中判定使用 [`AYEntity` §14.5](../AYEntity/design.md#145-组件命名约定未来) 的 Sim 代理，不读蒙皮矩阵。
+
+#### 实现优先级（确定性）
+
+| ID | 内容 | 依赖 |
+|----|------|------|
+| DET-07 | `DetBroadphase` + Fixed AABB 解算 MVP | DET-01 (`AYMath::Fixed`) |
+| — | Jolt 集成 | 不依赖 DET；与 lockstep 正交 |
+
+DET-07 为**产品触发**（见 [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) §9），不阻塞 Jolt Phase 1 与 `ENGINE-FOUNDATION-PLAN` Phase 0–2。
+
 ---
 
 ## 9. 目录结构
@@ -695,10 +741,18 @@ AYPhysics/
 - [ ] Vehicle
 - [ ] 优化/调试工具
 
+### Phase 6: 确定性碰撞（按需，DET-07）
+- [ ] `DetBroadphase` + Fixed AABB / sweep（**不**使用 Jolt）
+- [ ] 与 `AYEntity` `SystemLane::Sim` 集成
+
+> 与 Jolt Phase 1–5 **并行可选**；仅 lockstep / 回放产品需要时启动。
+
 ---
 
 ## 11. 参考
 
+- [Engine determinism architecture](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B, DET-07
+- [AYEntity SystemLane](../AYEntity/design.md#14-simulation-vs-presentation-systemlane)
 - [Jolt Physics](https://jrouwe.github.io/JoltPhysics/)
 - [SPH Fluid Simulation](http://mmacklin.com/sphfluid.pdf)
 - [Verlet Integration](https://en.wikipedia.org/wiki/Verlet_integration)
