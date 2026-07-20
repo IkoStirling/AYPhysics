@@ -1,759 +1,1194 @@
 # AYPhysics Design
 
-> **变更记录（2026-07-09）**：Jolt 与确定性 Sim 物理双路径 — 见 [§8.3](#83-确定性与双物理路径)；总览见 [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md)。
+> **Status:** v0.2 (2026-07-20) — R0 + industrial performance contracts (§17)
+> **Backend:** Jolt 3D (locked) + 2D TBD (Box2D vs Jolt-2D)
+> **Authority:** this file is the source of truth for AYPhysics architecture.
+> **Related:** [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B dual paths.
 
-## 1. 概述
+---
 
-AYPhysics 是 AY Engine 的**物理子系统**，负责：
-- 刚体动力学与碰撞检测
-- 关节约束系统
-- 2D/3D 物理混合场景
-- 特效系统（布料、毛发、流体、粒子）
+## 0. Reading guide
 
-### 1.1 设计目标
+| Audience | Read |
+|----------|------|
+| All engine engineers | §1 (Goals/Anti-Goals), §4 (decisions), §6 (backend abstraction), **§17 (perf)** |
+| Implementers (R1) | §4–§7, §5.2–§5.4 (command), §9 (API), §14 (tests), §15 (directory), **§17 gate** |
+| Implementers (R1.5 Jolt) | §17 in full (budgets, Jolt table, snapshot/query) — **blocked until §17.8 checklist green** |
+| ECS / gameplay | §11 (engine integration), §5.1 query dual-path |
+| Other AI agents | §2 (status), §3 (phases), §15 (directory); **do not** touch Jolt internals outside `backend/JoltBackend3D.cpp` |
 
-- **Jolt 后端**：现代 C++ 物理引擎，轻量高性能
-- **2D/3D 混合**：2D 角色在 3D 世界中
-- **特效自研**：布料/毛发/流体/粒子不依赖物理引擎
-- **独立模块**：物理模块独立于 ECS
-- **双路径**：Jolt 负责丰富动力学（**非 lockstep**）；确定性碰撞子集（DET-07）供 Sim 轨 — 见 [§8.3](#83-确定性与双物理路径)
+Related docs:
 
-### 1.2 在引擎中的位置
+- [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A (Jolt) vs Physics-B (DetBroadphase) split, lockstep rules
+- [`AYEntity/design.md`](../AYEntity/design.md) §14 — `SystemLane::Sim` for Physics-B
+- [`AYGameLoop/design.md`](../AYGameLoop/design.md) — SubSystem priority / `LockstepSession`
+- [`AYEventSystem/design.md`](../AYEventSystem/design.md) §5 — collision events via typed `EventBus`
+- [`AYResource/design.md`](../AYResource/design.md) — `.physscene` resource format (R2)
+- [`AYDevice/design.md`](../AYDevice/design.md) — independent of physics (no SDL dependency)
+- [`AYRenderer/design.md`](../AYRenderer/design.md) — debug-draw contract, lifecycle order
+
+Legacy reference (out of tree): **AliyatRenderer** used a custom rigidbody — **not ported**. Concepts only.
+
+---
+
+## 1. Overview — Goals / Non-Goals / Anti-Goals
+
+### 1.1 Goals
+
+`AYPhysics` is the **runtime physics subsystem** of AY Engine: rigidbody dynamics, collision detection, constraint joints, scene queries, with **2D and 3D as fully separated worlds**. It is consumed by gameplay / ECS / editor via a stable public API and runs against pluggable backends.
+
+| Goal | Means |
+|---|---|
+| **Modern C++17/20 backend** | Jolt (3D, locked); 2D decision deferred |
+| **2D + 3D separate worlds** | Independent `IPhysicsBackend3D` / `IPhysicsBackend2D` interfaces, independent handle spaces, no shared state |
+| **Backend abstraction** | `IPhysicsBackend*` interface; `JoltBackend3D` (R1 stub), `NullBackend3D` / `MockBackend3D` (always), `Box2DBackend2D` / `NullBackend2D` (R1.5+) |
+| **Thread-safe API** | Game-thread → physics-thread compact SPSC; physics-thread → sparse double-buffered snapshot; sync-query mailbox |
+| **Industrial throughput** | Enforceable budgets in §17 (1k/10k body step targets); Jolt JobSystem + sleep + sparse sync |
+| **Determinism gate** | Hard rule: `step()` refuses Jolt when `LockstepSession::isActive()`; R3+ DetBroadphase path for Sim lane |
+| **Resource-driven** | `.physscene` JSON via nlohmann/json (R2); cooked binary via `AYSerializer` (R3+) |
+| **No ECS dependency** | Module stands alone; ECS bridge is R2+ via `PhysicsSubSystem` + `RigidbodyComponent` |
+
+### 1.2 Non-Goals
+
+| AYPhysics does NOT | Owner instead |
+|---|---|
+| Own ECS / Entity model | `AYEntity` |
+| Own window / input device | `AYDevice` |
+| Own asset import / cooker | `AYResource` |
+| Run on Server-only builds (R3+ DetBroadphase is an exception) | `AYApplication` subsystem gating |
+| Replace server-authoritative networking | `AYNetwork` — Jolt results replicated as float transforms, **not** lockstep |
+| Use **PhysX** / **Bullet** | This design: Jolt (locked) |
+| Use **PhysX 5** | Jolt: smaller, modern C++, Zlib license, no vendor EULA |
+
+### 1.3 Anti-Goals (legacy failure modes to avoid)
+
+| Anti-Goal | Why |
+|---|---|
+| **No lockstep physics via Jolt** | Jolt's solver ordering, floating-point accumulation, and JobSystem threading produce non-bit-exact results across machines. Lockstep needs deterministic backend (DetBroadphase, R3+). |
+| **No raw pointer API** | Public API uses `BodyHandle{u32, invalid=0}` etc.; returning `Rigidbody*` creates lifetime / threading bugs. |
+| **No `PhysicsManager::step()` without command queue** | All mutations go through SPSC command queue; immediate mode reserved for tests only. |
+| **No `bgfx::ProgramHandle`-style "Renderer owns backend" leakage** | Public headers never include `<Jolt/Jolt.h>`; Jolt is locked to `backend/JoltBackend3D.cpp` TU. |
+| **No bare `enum class` without result return** | All public mutators return `PhysResult`; no `void` writes that can silently fail. |
+| **No `.physscene` shipping without round-trip test** | Scene save/load must be covered by `Test_PhysicsScene.cpp` (R2). |
+| **No fat-all-descs-in-every-command** | `PhysicsCommand` MUST NOT embed `RigidbodyDesc`+`ColliderDesc`+`JointDesc` on every slot. Create payloads are out-of-band (§5.2). Target `sizeof(PhysicsCommand) <= 64`. |
+| **No generation-less handles** | `BodyHandle` / `ColliderHandle` / `JointHandle` are packed index+generation; reuse after destroy must fail validation (§7.1). |
+| **No dense-by-handle transform dump** | `PhysFrameSnapshot` publishes **active / always-sync** bodies only (§5.3); never index transforms by raw handle as array subscript. |
+
+### 1.4 Position in engine (2026-07)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Game Engine                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────┐    ┌──────────────────────────────────────┐  │
-│  │  AYGame    │───▶│           AYPhysics                 │  │
-│  │  Logic     │    │                                      │  │
-│  └─────────────┘    │  ┌────────────────────────────────┐   │  │
-│                      │  │      PhysicsManager           │   │  │
-│                      │  └──────────────┬───────────────┘   │  │
-│                      │                 │                     │  │
-│                      │  ┌──────────────▼───────────────┐   │  │
-│                      │  │     PhysicsWorld3D (Jolt)   │   │  │
-│                      │  │  刚体/碰撞体/关节/检测      │   │  │
-│                      │  └──────────────┬───────────────┘   │  │
-│                      │                 │                     │  │
-│                      │  ┌──────────────▼───────────────┐   │  │
-│                      │  │     PhysicsWorld2D         │   │  │
-│                      │  │  2D 物理 + 坐标转换       │   │  │
-│                      │  └─────────────────────────────┘   │  │
-│                      │                                    │  │
-│                      │  ┌─────────────────────────────┐   │  │
-│                      │  │     特效系统 (自研)        │   │  │
-│                      │  │  AYCloth / AYFluid / AYParticle │ │  │
-│                      │  └─────────────────────────────┘   │  │
-│                      └──────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
++---------------------------------------------------+
+|                AY Engine / GameLoop              |
++---------------------------------------------------+
+| AYEntity  AYAnimation  AYRenderer  AYEventSystem |
+|     |          |           |            |        |
+|     +----------+-----------+------------+        |
+|                       |                           |
+|                PhysicsSubSystem                   |
+|                (priority 700+)                    |
+|                       |                           |
+|                +------▼------+                    |
+|                | Physics     |                    |
+|                | Manager     |                    |
+|                +------+------+                    |
+|                       |                           |
+|          +------------+------------+              |
+|          |                         |              |
+|    PhysicsWorld3D           PhysicsWorld2D        |
+|    + IPhysicsBackend3D      + IPhysicsBackend2D   |
+|       (Jolt / Null / Mock)    (Box2D / Null R1.5) |
++---------------------------------------------------+
 ```
 
 ---
 
-## 2. Jolt 后端
+## 2. Implementation status
 
-### 2.1 选择理由
+**Date:** 2026-07-20 · **R0.1** design complete (perf contracts in §17). No code in tree.
 
-| 特性 | Jolt | PhysX |
-|-------|------|-------|
-| 库大小 | ~5MB | ~50MB |
-| API 风格 | 现代 C++ | C++/C |
-| 多线程 | 原生优化 | 复杂调度器 |
-| 功能覆盖 | 刚体/碰撞/关节/角色/载具 | 全部 + 布料/流体 |
-| 许可证 | Zlib (宽松) | NVIDIA EULA |
+| Lane | Phase | Scope | Status |
+|------|-------|-------|--------|
+| **Doc** | R0 | design.md + CLAUDE.md + README.md + .gitignore | ✅ |
+| **Doc** | R0.1 | Compact command, generation handles, sparse snapshot, query dual-path, §17 gate | ✅ |
+| **Backend** | R1 | `IPhysicsBackend*` + Null + Mock + compact SPSC + create pool + Manager + handle/snapshot tests | ⏳ next |
+| **Backend** | R1.5 | Jolt 3D real impl — **blocked on §17.8 checklist** | ⏳ |
+| **Backend** | R2 | 2D backend decision + `IPhysicsBackend2D` impl | ⏳ |
+| **Engine** | E1 | `PhysicsSubSystem` registered in `AYGameLoop` | ⏳ |
+| **Engine** | E2 | `RigidbodyComponent` / `ColliderComponent` / `JointComponent` in `AYEntity` | ⏳ |
+| **Resource** | RES | `.physscene` JSON loader + `AYResource` bridge | ⏳ |
+| **Effects** | F1 | Cloth (Verlet) + Fluid (SPH) + Particle (CPU) | ⏳ |
+| **Editor** | ED1 | Physics inspector + collision gizmo + profiler overlay | ⏳ |
 
-### 2.2 支持的功能
-
-```
-✅ 刚体动力学
-✅ 休眠系统 (Sleeping)
-✅ 约束/关节
-   ├── Hinge (铰链)
-   ├── Fixed (固定)
-   ├── Distance (距离)
-   ├── Spring (弹簧)
-   ├── Slider (滑动)
-   ├── Point (点)
-   └── Cone (锥形)
-✅ 碰撞检测
-   ├── Broadphase (SAP/AABB)
-   └── Narrowphase (GJK/EPA)
-✅ 碰撞形状
-   ├── Box
-   ├── Sphere
-   ├── Capsule
-   ├── Convex Hull
-   ├── Triangle Mesh
-   └── Heightfield
-✅ Character Controller
-✅ Ragdoll
-✅ Vehicle
-✅ Ray/Shape Cast
-✅ Volume Queries (Overlap)
-❌ 布料/毛发（自研 AYCloth）
-❌ 流体（自研 AYFluid）
-❌ 粒子（自研 AYParticle）
-```
+✅ shipped · ⏳ planned · 🅿 deferred
 
 ---
 
-## 3. 核心架构
+## 3. Phase roadmap (multi-lane)
 
-### 3.1 架构设计
+Following the AYUI §3 R-*/C-*/U-* lane convention: `B-*` = backend, `E-*` = engine integration, `F-*` = effects, `ED-*` = editor, `RES-*` = resource.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AYPhysics                               │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  PhysicsManager (管理器)                                    │
-│      │                                                        │
-│      ├── PhysicsWorld3D (Jolt)                             │
-│      │   ├── 刚体管理                                       │
-│      │   ├── 碰撞体管理                                     │
-│      │   ├── 关节管理                                       │
-│      │   └── 碰撞检测/响应                                  │
-│      │                                                        │
-│      └── PhysicsWorld2D                                     │
-│          ├── 刚体管理                                       │
-│          ├── 碰撞体管理                                     │
-│          ├── 关节管理                                       │
-│          └── 2D/3D 坐标转换                               │
-│                                                              │
-│  特效系统                                                  │
-│      ├── AYCloth (布料/毛发 - Verlet 积分)                 │
-│      ├── AYFluid (流体 - SPH)                             │
-│      └── AYParticle (GPU 粒子)                             │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
+### 3.1 Backend lane (precedes any user code)
 
-### 3.2 2D/3D 混合场景
+| Step | Scope | Exit criteria |
+|------|-------|---------------|
+| **B-1** | `IPhysicsBackend*` interface, `PhysResult` enum, `BodyHandle`/`ColliderHandle`/`JointHandle` | Headers compile; `enum` covers all failure modes |
+| **B-2** | `NullBackend3D`, `MockBackend3D` (Null is always; Mock is test-only) | Unit tests pass; Null mode compile-clean |
+| **B-3** | Compact `PhysicsCommand` (≤64 B) + `PhysicsCreatePool` + SPSC ring | `sizeof` assert; pool + cross-thread SPSC green |
+| **B-4** | Generation handles + sparse `PhysFrameSnapshot` + sync-query mailbox | Handle/snapshot/sync-query tests green |
+| **B-5** | `PhysicsManager` skeleton (World3D/2D, step, fetchResults) | Manager tests pass |
+| **B-6** | `JoltBackend3D` stub (`#ifdef AYPHYSICS_NO_JOLT` fallback) | Null-mode compiles without Jolt installed |
+| **B-7** | `JoltBackend3D` real impl (Box/Sphere/Capsule) + §17.8 | Bench P1/P2 + checklist in PR |
 
-```
-典型用例：
-├── 3D 地图/环境
-├── 2D 俯视角角色 (ARPG、塔防)
-└── 2D UI/特效在屏幕空间
+### 3.2 Engine-integration lane
 
-坐标转换：
-2D World ←→ 3D World
-pos2D → pos3D (x, y, z=0)
-pos3D → pos2D (x, y)
-```
+| Step | Scope | Exit criteria |
+|------|-------|---------------|
+| **E-1** | `PhysicsSubSystem : ayt::game::ISubSystem` registered in GameLoop | Loop pump calls `step(dt)` |
+| **E-2** | `RigidbodyComponent` / `ColliderComponent` in AYEntity | Entity drives physics state |
+| **E-3** | `PhysicsEventBridge` → `AYEventSystem` typed events (collision enter/stay/exit) | Events delivered on main thread |
+
+### 3.3 Resource lane
+
+| Step | Scope | Exit criteria |
+|------|-------|---------------|
+| **RES-1** | `.physscene` JSON schema + `PhysSceneLoader` (nlohmann/json, mirror `AYLayoutLoader`) | Round-trip test |
+| **RES-2** | `AYResource::IPhysicsScene` asset handle + `.physscene` cook path | Cook → load → step works |
+
+### 3.4 Effects lane (R3+, deferred)
+
+| Step | Scope | Exit criteria |
+|------|-------|---------------|
+| **F-1** | Cloth (Verlet integration, distance constraints) | Visual flag flapping at 60 fps |
+| **F-2** | Fluid (SPH 2D demo) | Stable sim 30 s |
+| **F-3** | Particle (CPU MVP, uniform grid) | 10 k particles at 30 fps |
+
+### 3.5 Editor lane (R3+, deferred)
+
+| Step | Scope | Exit criteria |
+|------|-------|---------------|
+| **ED-1** | Physics inspector panel (body/collider/joint tree) | Editor opens panel, edits properties |
+| **ED-2** | Collision shape gizmo + ray-cast preview | Editor draw matches world |
+| **ED-3** | Profiler overlay (broadphase / narrowphase / solver timing) | Stats visible in debug overlay |
 
 ---
 
-## 4. 核心接口
+## 4. Technology decisions (locked / TBD)
 
-### 4.1 物理管理器
+Following the AYAudio §2 ✅ / TBD convention.
+
+### 4.1 3D backend: **Jolt** ✅ (locked)
+
+| Option | Verdict | Reason |
+|--------|---------|--------|
+| **PhysX** | ❌ Rejected | NVIDIA EULA, ~50 MB, opaque multi-threaded scheduler |
+| **Bullet** | ❌ Rejected | Aging API, larger than Jolt, weaker mobile story |
+| **Jolt** | ✅ **Chosen** | ~5 MB, modern C++17, Zlib license, multi-threaded JobSystem, comparable performance |
+| Custom rigidbody | ❌ Rejected | Engineering cost; Jolt covers all our needs |
+
+**Implementation:** vcpkg `jolt-physics` port (mirror `AYAudio` `find_path` + vcpkg fallback). If vcpkg port not present: `find_path(Jolt/Jolt.h)` with header-only fallback. If still missing: `AYPHYSICS_NO_JOLT=1` and JoltBackend3D excluded from build (Null-only mode for CI).
+
+### 4.2 2D backend: **TBD** (open)
+
+| Option | Verdict (provisional) | Reason |
+|--------|----------------------|--------|
+| **Jolt 2D mode** | ⏸ Optional | Same backend, unified API; Jolt 2D support is recent, less mature |
+| **Box2D** | ⏸ Candidate | Industry-standard 2D; well-documented; ~tens of KB |
+| **Custom 2D** | ❌ Rejected | Engineering cost; both options above suffice |
+
+**Decision gate (before Phase C ship):**
+- License: both permissive (Box2D MIT, Jolt Zlib)
+- API ease: Box2D simpler for 2D-only games
+- 2D completeness: Jolt 2D missing some 2D-specific tuning; Box2D is purpose-built
+- vcpkg availability: both available
+
+**Default if undecided at ship:** Box2D (proven 2D focus). **Decision gate:** Phase C evaluation period ≥1 week; documented in §16 changelog when decided.
+
+### 4.3 Resource / scene format: **TBD** (R2)
+
+| Strategy | Status | Phase |
+|----------|--------|-------|
+| **A. Hand-built `PhysSceneDesc` (R1)** | ✅ locked | Used until RES-1 lands |
+| **B. JSON `.physscene` via nlohmann/json** | ⏸ planned | RES-1 |
+| **C. Cooked binary via `AYSerializer`** | ⏸ planned | RES-2 |
+
+### 4.4 Threading model: **SPSC queue + Jolt JobSystem** ✅ (locked)
+
+- **Game thread:** enqueues compact `PhysicsCommand` records into SPSC ring; **never** touches backend state directly.
+- **Physics thread:** owns the `IPhysicsBackend*` instance; drains queue (budgeted, §5.4); runs `step(dt)`; writes double-buffered result snapshot.
+- **Result fetch:** game thread calls `fetchResults()` at frame start, gets lock-free `PhysFrameSnapshot` (sparse active-body list, §5.3).
+- **Jolt JobSystem:** workers spawned at backend init; default count = `max(1, hardware_concurrency - 2)` so the dedicated physics thread + one OS core remain for game/render (tunable via `jobWorkerCount`, §17.3).
+- **Sync queries:** game thread may block on a physics-thread mailbox for same-frame raycast/overlap (§5.1); never touch `JPH::*` from game thread.
+
+### 4.5 Backend selection: **construction-time only** ✅ (locked)
+
+`PhysicsManager::create(PhysicsBackendDescriptor desc)` chooses backend once. **No runtime backend swap.** Descriptor accepts `BackendKind { DefaultJolt, Null, Mock }` for 3D and 2D independently.
+
+### 4.6 Performance posture ✅ (locked, normative detail in §17)
+
+Industrial target: approach Jolt-sample / mid-tier engine throughput — **not** a toy wrapper. R1 ships compact command + generation handles; R1.5 is **gated** on §17.8 checklist. Fat-command AYAudio-style POD is explicitly rejected for physics.
+
+---
+
+## 5. Threading & command model
+
+### 5.1 Thread contract (normative)
+
+| Operation | Thread | Notes |
+|---|---|---|
+| `PhysicsManager::create` | Main | Synchronous; installs backend |
+| `PhysicsManager::step(dt)` | Main | Enqueues `Step`; returns immediately |
+| `PhysicsManager::fetchResults()` | Main | Returns reference to latest `PhysFrameSnapshot` (double-buffered) |
+| `PhysicsManager::shutdown` | Main | Drains queue, joins physics thread |
+| `World3D::createRigidbody(desc, out)` | Main | Allocates create-slot + handle; enqueues compact `CreateRigidbody` with `CreateSlotId`; returns `PhysResult` + `out` handle immediately (body exists after next drain) |
+| `World3D::destroyRigidbody(handle)` | Main | Enqueues `DestroyRigidbody`; generation invalidated on physics thread |
+| `World3D::raycastAsync` / `overlap*Async` | Main | Enqueues query; result appears in **next** `fetchResults()` under `queryId` |
+| `World3D::raycastSync` / `overlap*Sync` | Main | Blocks game thread on sync-query mailbox; physics thread services between commands / after step; **never** calls into Jolt from main |
+| **All backend internals** | **Physics thread only** | `JPH::PhysicsSystem`, `JPH::BodyInterface`, etc. **never** touched from game thread |
+
+**Query dual-path (locked):**
+
+| API | Latency | Use |
+|---|---|---|
+| `*Async` | +1 frame (snapshot) | Batch AI / UI / debug; preferred default |
+| `*Sync` | Same frame (blocks) | Gameplay that must decide this tick (hitscan, ground check). Budget: ≤ 64 sync queries / frame before warning (§17.2) |
+
+### 5.2 Command queue (compact + out-of-band create)
+
+Power-of-2 SPSC ring (API shape mirrors `AYAudioCommandQueue`; **payload layout does not** — Audio's fat POD is rejected here).
+
+**Hard rules:**
+
+1. `sizeof(PhysicsCommand) <= 64` (static_assert in R1). Prefer 48–56.
+2. Create / heavy descriptors live in an **out-of-band create pool** addressed by `CreateSlotId`; the ring only carries the slot id + allocated handle.
+3. Hot mutators (`ApplyForce`, `SetTransform`, `Step`) use a tagged `union` — no spare `RigidbodyDesc` on every slot.
+4. Default `commandQueueCapacity = 1024` → ring memory ≤ 64 KiB at the 64-byte cap.
 
 ```cpp
-class PhysicsManager {
+enum class PhysicsCommandType : uint8_t {
+    Step,
+    CreateRigidbody,   // payload: createSlot + body handle
+    DestroyRigidbody,
+    SetRigidbodyTransform,
+    CreateCollider,
+    DestroyCollider,
+    SetColliderShape,
+    CreateJoint,
+    DestroyJoint,
+    ApplyForce,
+    ApplyImpulse,
+    RaycastAsync,
+    OverlapSphereAsync,
+    OverlapBoxAsync,
+    WakeAll,
+    SleepAll,
+    // Sync queries use SyncQueryMailbox, not this ring (see §5.4)
+};
+
+using CreateSlotId = uint32_t;
+constexpr CreateSlotId InvalidCreateSlotId = 0;
+
+// Out-of-band pool entry (game allocates, physics consumes + frees slot).
+struct PhysicsCreatePayload {
+    enum class Kind : uint8_t { Rigidbody, Collider, Joint } kind = Kind::Rigidbody;
+    RigidbodyDesc rigidDesc{};
+    ColliderDesc  colliderDesc{};
+    JointDesc     jointDesc{};
+};
+
+struct PhysicsCommand {
+    PhysicsCommandType type = PhysicsCommandType::Step;
+    BodyHandle     body     = InvalidBodyHandle;
+    ColliderHandle collider = InvalidColliderHandle;
+    JointHandle    joint    = InvalidJointHandle;
+    CreateSlotId   createSlot = InvalidCreateSlotId;
+    uint32_t       queryId  = 0;
+    uint32_t       layerMask = 0xFFFFFFFFu;
+
+    union {
+        struct { float deltaTime; } step;
+        struct { float x, y, z, w; } vec4;           // force / impulse / halfExtents / etc.
+        struct { float px, py, pz, qx, qy, qz, qw; } xform; // pos + quat (tight)
+        struct { float ox, oy, oz, dx, dy, dz; } ray; // origin + dir
+        struct { float cx, cy, cz, radius; } sphere;
+    } u{};
+};
+
+static_assert(sizeof(PhysicsCommand) <= 64, "PhysicsCommand must stay cache-friendly");
+```
+
+```cpp
+class PhysicsCreatePool {
 public:
-    static PhysicsManager& instance();
+    // Game thread: copy desc into free slot; returns id or Invalid on exhaustion.
+    CreateSlotId allocate(const PhysicsCreatePayload& payload);
+    // Physics thread: take ownership; slot returned to free list after execute.
+    bool take(CreateSlotId id, PhysicsCreatePayload& out);
+    uint32_t capacity() const;
+};
 
-    // 世界获取
-    PhysicsWorld3D* getWorld3D() { return m_world3D.get(); }
-    PhysicsWorld2D* getWorld2D() { return m_world2D.get(); }
-
-    // 2D/3D 坐标转换
-    FVector3 world2DTo3D(const FVector2& pos2D) const {
-        return FVector3(pos2D.x, pos2D.y, 0.0f);
-    }
-
-    FVector2 world3DTo2D(const FVector3& pos3D) const {
-        return FVector2(pos3D.x, pos3D.y);
-    }
-
-    // 时间步
-    void step(float deltaTime);
-
+class PhysicsCommandQueue {
+public:
+    bool initialize(uint32_t capacity);   // rounds up to power of two; min 2
+    void shutdown();
+    bool tryPush(const PhysicsCommand& cmd);   // game thread
+    bool tryPop(PhysicsCommand& outCmd);       // physics thread
+    uint32_t approximateDepth() const;
+    uint32_t capacity() const { return _capacity; }
 private:
-    std::unique_ptr<PhysicsWorld3D> m_world3D;
-    std::unique_ptr<PhysicsWorld2D> m_world2D;
+    std::vector<PhysicsCommand> _buffer;
+    uint32_t _capacity = 0;
+    uint32_t _mask = 0;
+    std::atomic<uint64_t> _writeIndex{0};
+    std::atomic<uint64_t> _readIndex{0};
 };
 ```
 
-### 4.2 物理世界基类
+**Create flow:** `createRigidbody(desc, out)` → allocate handle (index+gen) → `createPool.allocate({Rigidbody, desc})` → `tryPush({CreateRigidbody, body, createSlot})` → `out = body`, return `Ok`. If pool or queue full → roll back slot/handle, `out = InvalidBodyHandle`, return `QueueFull` / `NoMemory` (no silent drop on create).
+
+### 5.3 Result snapshot (sparse active-body)
+
+Double-buffered `PhysFrameSnapshot`. Physics thread writes back buffer; atomic publish; game reads front.
 
 ```cpp
-class IPhysicsWorld {
-public:
-    virtual ~IPhysicsWorld() = default;
+struct BodyTransform {
+    BodyHandle  handle = InvalidBodyHandle;
+    FVector3    position{};
+    FQuaternion rotation{};
+    FVector3    linearVelocity{};   // included when syncVelocities=true (descriptor)
+    FVector3    angularVelocity{};
+    uint8_t     flags = 0;          // bit0 = wasSleepingThisFrame (optional diagnostic)
+};
 
-    // 时间步
+struct PhysFrameSnapshot {
+    uint64_t frameIndex = 0;
+    float    stepSeconds = 0.0f;
+    // Dense list of bodies that are Awake OR marked AlwaysSync. NOT indexed by handle.
+    std::vector<BodyTransform> transforms;
+    std::vector<CollisionEvent> collisionEvents;
+    std::vector<QueryResult>    queryResults;   // async queries only; keyed by queryId
+};
+```
+
+**Lookup:** game/ECS builds a transient `handle → index` map only if needed; hot path should iterate `transforms` linearly. Sleeping bodies are **omitted** unless `RigidbodyDesc.alwaysSync` was set at create (or later via a SetAlwaysSync command in v2+).
+
+### 5.4 Drain, backpressure, sync-query mailbox
+
+| Policy | Rule |
+|---|---|
+| **Drain budget** | Physics thread pops at most `min(queue.capacity(), maxDrainPerTick)` per wake; default `maxDrainPerTick = 4096` (safety cap, mirror AYAudio). |
+| **Step ordering** | Drain **all** pending mutators up to budget, then `backend->step(dt)`, then publish snapshot. Commands arriving during step wait for next wake. |
+| **Queue full (create)** | `tryPush` fails → `PhysResult::QueueFull`; handle not published / create slot rolled back. |
+| **Queue full (fire-and-forget mutators)** | `ApplyForce` / `SetTransform`: return `QueueFull`; **do not** silently drop without telling caller (unlike AYAudio). |
+| **Create pool full** | `PhysResult::NoMemory`; no command enqueued. |
+| **Sync query mailbox** | Separate SPSC or mutex+cv slot (capacity small, default 64). Game pushes `SyncQueryRequest`, waits on condition_variable; physics services mailbox before and after `step`. Timeout → `PhysResult::BackendError` / empty hit. |
+| **Overflow telemetry** | Counters: `queueHighWater`, `queueRejectCount`, `syncQueryWaitUs` — exposed via profiler (§13 / ED-3). |
+
+---
+
+## 6. Backend abstraction (`IPhysicsBackend*`)
+
+Following the `interface/IAudioBackend.h` convention.
+
+### 6.1 Layer diagram
+
+```
++-------------------------------------------------------------+
+| Gameplay / Editor / Script / ECS                            |
++-----------------------------+-------------------------------+
+                              | PhysicsCommandQueue (SPSC)
++-----------------------------▼-------------------------------+
+| PhysicsManager / PhysicsWorld3D / PhysicsWorld2D            |
+|   + PhysFrameSnapshot (double-buffered)                     |
++-----------------------------+-------------------------------+
+                              | IPhysicsBackend3D | IPhysicsBackend2D
++-----------------------------▼-------------------------------+
+| NullBackend3D | MockBackend3D | JoltBackend3D                |
+| NullBackend2D | MockBackend2D | Box2DBackend2D (R1.5+)      |
++-------------------------------------------------------------+
+```
+
+### 6.2 Common interface
+
+```cpp
+// interface/IPhysicsBackend.h
+namespace ayt::physics {
+
+struct PhysicsBackendInfo {
+    const char* name = nullptr;     // "Null" / "Mock" / "Jolt" / "Box2D"
+    uint32_t maxBodies = 0;
+    uint32_t maxColliders = 0;
+    uint32_t maxJoints = 0;
+    bool realDevice = false;        // true if Jolt / Box2D
+};
+
+class IPhysicsBackend {
+public:
+    virtual ~IPhysicsBackend() = default;
+
+    // Lifecycle (physics thread).
+    virtual bool start(const PhysicsBackendInfo& info) = 0;
+    virtual void stop() = 0;
+
+    // Step (physics thread; dt clamped to [1/240, 1/30] by default).
     virtual void step(float deltaTime) = 0;
 
-    // 碰撞检测
-    virtual bool raycast(const Ray& ray, RaycastHit& hit) = 0;
-    virtual void overlapSphere(const FVector3& center, float radius,
-                               std::vector<Collider*>& results) = 0;
-    virtual void overlapBox(const FVector3& center, const FVector3& halfExtents,
-                           std::vector<Collider*>& results) = 0;
+    // Snapshot read (physics thread writes back; game thread reads front).
+    virtual void publishSnapshot(PhysFrameSnapshot& outSnapshot) = 0;
 
-    // 调试绘制
-    virtual void debugDraw(DebugRenderer* renderer) = 0;
+    // Command drain (physics thread).
+    virtual void execute(const PhysicsCommand& cmd) = 0;
 
-    // 休眠管理
-    virtual void wakeAll() = 0;
-    virtual void sleepAll() = 0;
+    // Diagnostic.
+    virtual PhysicsBackendInfo describe() const = 0;
+    virtual bool isRealDevice() const = 0;
 };
+
+} // namespace ayt::physics
 ```
 
-### 4.3 3D 物理世界
+### 6.3 3D-specific interface (R1 stub; populates after B-6)
 
 ```cpp
-class PhysicsWorld3D : public IPhysicsWorld {
+// interface/IPhysicsBackend3D.h
+namespace ayt::physics {
+class IPhysicsBackend3D : public IPhysicsBackend {
 public:
-    PhysicsWorld3D();
-    ~PhysicsWorld3D();
-
-    // ============== 世界设置 ==============
-    void setGravity(const FVector3& gravity);
-    void setSubSteps(int numSubSteps);  // 物理子步数
-    void setLinearDamping(float damping);
-    void setAngularDamping(float damping);
-
-    // ============== 刚体 ==============
-    Rigidbody3D* createRigidbody(const RigidbodyDesc& desc);
-    void destroyRigidbody(Rigidbody3D* body);
-
-    // 批量操作
-    void addRigidbody(Rigidbody3D* body);
-    void removeRigidbody(Rigidbody3D* body);
-
-    // ============== 碰撞体 ==============
-    Collider3D* createCollider(const ColliderDesc& desc);
-    void destroyCollider(Collider3D* collider);
-
-    // ============== 关节 ==============
-    Joint3D* createJoint(const JointDesc& desc);
-    void destroyJoint(Joint3D* joint);
-
-    // ============== 物理查询 ==============
-    void step(float deltaTime) override;
-    bool raycast(const Ray& ray, RaycastHit& hit) override;
-    void overlapSphere(const FVector3& center, float radius,
-                       std::vector<Collider*>& results) override;
-    void overlapBox(const FVector3& center, const FVector3& halfExtents,
-                    std::vector<Collider*>& results) override;
-
-    // ============== 调试 ==============
-    void debugDraw(DebugRenderer* renderer) override;
-    void wakeAll() override;
-    void sleepAll() override;
-
-private:
-    JPH::PhysicsSystem m_system;  // Jolt 物理系统
-    JPH::BodyManager m_bodyManager;
-    JPH::ConstraintManager m_constraintManager;
+    // Physics-thread only. Handles already allocated by World; backend binds native body.
+    virtual PhysResult createRigidbody(BodyHandle handle, const RigidbodyDesc& desc) = 0;
+    virtual PhysResult destroyRigidbody(BodyHandle handle) = 0;
+    virtual PhysResult setRigidbodyTransform(BodyHandle handle, const FVector3& pos, const FQuaternion& rot) = 0;
+    // ... colliders, joints, queries (async execute via PhysicsCommand; sync via mailbox)
 };
+}
 ```
 
-### 4.4 2D 物理世界
+### 6.4 2D-specific interface (R1 placeholder)
 
 ```cpp
-class PhysicsWorld2D : public IPhysicsWorld {
+// interface/IPhysicsBackend2D.h
+namespace ayt::physics {
+class IPhysicsBackend2D : public IPhysicsBackend {
 public:
-    PhysicsWorld2D();
-    ~PhysicsWorld2D();
-
-    // ============== 世界设置 ==============
-    void setGravity(const FVector2& gravity);
-
-    // ============== 刚体 ==============
-    Rigidbody2D* createRigidbody(const RigidbodyDesc& desc);
-    void destroyRigidbody(Rigidbody2D* body);
-
-    // ============== 碰撞体 ==============
-    Collider2D* createCollider(const ColliderDesc& desc);
-    void destroyCollider(Collider2D* collider);
-
-    // ============== 关节 ==============
-    Joint2D* createJoint(const JointDesc& desc);
-    void destroyJoint(Joint2D* joint);
-
-    // ============== 物理查询 ==============
-    void step(float deltaTime) override;
-    bool raycast(const Ray& ray, RaycastHit& hit) override;
-    void overlapSphere(const FVector3& center, float radius,
-                       std::vector<Collider*>& results) override;
-    void overlapBox(const FVector3& center, const FVector3& halfExtents,
-                    std::vector<Collider*>& results) override;
-
-    // ============== 调试 ==============
-    void debugDraw(DebugRenderer* renderer) override;
-    void wakeAll() override;
-    void sleepAll() override;
-
-private:
-    // 可以用 Jolt 2D 模式或 Box2D
-    // 这里用 Jolt 的 2D 兼容模式
+    // Same shape as 3D but with FVector2 and 2D-specific joint types
 };
+}
 ```
+
+### 6.5 Null / Mock / Jolt implementations
+
+| Backend | File | Purpose |
+|---|---|---|
+| `NullBackend3D` | `backend/NullBackend3D.{h,cpp}` | All commands NoOp; used for headless CI / determinism gate |
+| `MockBackend3D` | `backend/MockBackend3D.{h,cpp}` | Captures command stream for tests; exposes `inspectMockBackend()` via `AYPhysicsBackendTestAccess.h` |
+| `JoltBackend3D` | `backend/JoltBackend3D.{h,cpp}` | R1 = stub; R1.5 = real implementation; **only TU** that includes `<Jolt/Jolt.h>` |
 
 ---
 
-## 5. 刚体与碰撞体
+## 7. Core data model
 
-### 5.1 刚体描述
+### 7.1 Handles (packed index + generation)
+
+Unlike AYAudio's plain monotonic `uint32`, physics handles **must** detect use-after-destroy. Layout (locked):
 
 ```cpp
-enum class BodyType { Static, Dynamic, Kinematic };
+// Packed uint32:
+//   bits [0..19]  = index      (1 .. 1,048,575); 0 reserved
+//   bits [20..31] = generation (1 .. 4095); wraps; 0 reserved for invalid
+using BodyHandle     = uint32_t;
+using ColliderHandle = uint32_t;
+using JointHandle    = uint32_t;
 
-enum class MotionMode { Translatable, Rotatable, Full };
+constexpr BodyHandle     InvalidBodyHandle     = 0;
+constexpr ColliderHandle InvalidColliderHandle = 0;
+constexpr JointHandle    InvalidJointHandle    = 0;
+
+constexpr uint32_t kPhysHandleIndexBits = 20;
+constexpr uint32_t kPhysHandleGenBits   = 12;
+constexpr uint32_t kPhysHandleIndexMask = (1u << kPhysHandleIndexBits) - 1u;
+
+inline uint32_t handleIndex(BodyHandle h) noexcept { return h & kPhysHandleIndexMask; }
+inline uint32_t handleGeneration(BodyHandle h) noexcept { return h >> kPhysHandleIndexBits; }
+inline BodyHandle makeBodyHandle(uint32_t index, uint32_t generation) noexcept {
+    return (generation << kPhysHandleIndexBits) | (index & kPhysHandleIndexMask);
+}
+```
+
+| Rule | Detail |
+|---|---|
+| Invalid | Entire value `0` (index 0 and gen 0 both reserved) |
+| Alloc | Free-list of indices; on reuse, `generation = (generation % 4095) + 1` |
+| Validate | Every mutate/query checks slot generation == handle generation → else `PhysResult::NotFound` |
+| Spaces | 3D and 2D worlds each have independent allocators |
+| Cap | Max live bodies per world = `2^20 - 1` (hardware/Jolt limits are lower; see §17.3 `maxBodies`) |
+
+### 7.2 Error model
+
+```cpp
+enum class PhysResult : uint8_t {
+    Ok              = 0,
+    InvalidParam    = 1,
+    NoMemory        = 2,
+    AlreadyExists   = 3,
+    NotFound        = 4,
+    InvalidState    = 5,    // e.g. step on uninitialized backend
+    BackendError    = 6,    // Jolt / Box2D internal failure
+    OutOfRange      = 7,
+    Unsupported     = 8,    // e.g. Jolt refused in lockstep; feature not built
+    QueueFull       = 9,    // SPSC overflow (game overran physics)
+};
+
+const char* toString(PhysResult r);
+```
+
+### 7.3 Layers & masks
+
+```cpp
+using PhysLayer    = uint16_t;   // 0..15 reserved as engine-default; user-defined otherwise
+using PhysLayerMask = uint32_t;  // 32-bit mask
+
+enum class PhysDefaultLayer : uint16_t {
+    Static    = 0,
+    Dynamic   = 1,
+    Character = 2,
+    Trigger   = 3,
+    Debris    = 4,
+    // user layers 16+
+};
+```
+
+### 7.4 Material
+
+```cpp
+struct PhysMaterial {
+    float friction    = 0.5f;
+    float restitution = 0.0f;
+    float density     = 1.0f;   // optional: backend may compute mass from density * volume
+};
+```
+
+### 7.5 Descriptor structs (R1)
+
+```cpp
+enum class BodyType : uint8_t { Static, Dynamic, Kinematic };
 
 struct RigidbodyDesc {
-    BodyType type = BodyType::Dynamic;
-    MotionMode motionMode = MotionMode::Full;
-
-    FVector3 position;
-    FQuaternion rotation;
-
-    FVector3 linearVelocity;
-    FVector3 angularVelocity;
-
-    float mass = 1.0f;
-    float friction = 0.5f;
-    float restitution = 0.0f;
-    float linearDamping = 0.01f;
-    float angularDamping = 0.01f;
-
-    uint32_t collisionGroup = 0;
-    uint32_t collisionMask = 0xFFFFFFFF;
-};
-```
-
-### 5.2 碰撞体描述
-
-```cpp
-// 3D 碰撞体类型
-enum class ColliderType3D {
-    Box,
-    Sphere,
-    Capsule,
-    ConvexHull,
-    TriangleMesh,
-    Heightfield
+    BodyType    type        = BodyType::Dynamic;
+    PhysLayer   layer       = 0;
+    PhysLayerMask collideMask = 0xFFFFFFFFu;
+    FVector3    position{};
+    FQuaternion rotation{};
+    FVector3    linearVelocity{};
+    FVector3    angularVelocity{};
+    float       mass        = 1.0f;
+    float       linearDamping  = 0.05f;
+    float       angularDamping = 0.05f;
+    PhysMaterial material{};
+    bool        alwaysSync  = false;  // if true, appear in snapshot even when sleeping (§5.3)
+    bool        enableCCD   = false;  // maps to Jolt MotionQuality::LinearCast when backend supports
 };
 
-// 碰撞体基类
-class Collider3D {
-public:
-    virtual ~Collider3D() = default;
+enum class ColliderShape : uint8_t { Box, Sphere, Capsule, ConvexHull, TriangleMesh, Heightfield };
 
-    ColliderType3D getType() const { return m_type; }
-
-    // 变换
-    void setPosition(const FVector3& pos);
-    void setRotation(const FQuaternion& rot);
-
-    // 材质
-    void setFriction(float friction);
-    void setRestitution(float restitution);
-
-protected:
-    ColliderType3D m_type;
-    Collider3D(ColliderType3D type) : m_type(type) {}
+struct ColliderDesc {
+    BodyHandle  body  = InvalidBodyHandle;
+    ColliderShape shape = ColliderShape::Box;
+    FVector3    halfExtents{0.5f, 0.5f, 0.5f};   // Box
+    float       radius = 0.5f;                    // Sphere / Capsule
+    float       height = 1.0f;                    // Capsule
+    PhysMaterial material{};
+    bool        isTrigger = false;
 };
 
-// Box 碰撞体
-class BoxCollider3D : public Collider3D {
-public:
-    BoxCollider3D(const FVector3& halfExtents);
-
-    FVector3 getHalfExtents() const { return m_halfExtents; }
-
-private:
-    FVector3 m_halfExtents;
-};
-
-// Sphere 碰撞体
-class SphereCollider3D : public Collider3D {
-public:
-    SphereCollider3D(float radius);
-
-    float getRadius() const { return m_radius; }
-
-private:
-    float m_radius;
-};
-
-// Capsule 碰撞体
-class CapsuleCollider3D : public Collider3D {
-public:
-    CapsuleCollider3D(float height, float radius);
-
-    float getHeight() const { return m_height; }
-    float getRadius() const { return m_radius; }
-
-private:
-    float m_height;
-    float m_radius;
-};
-```
-
----
-
-## 6. 关节
-
-### 6.1 关节类型
-
-```cpp
-enum class JointType {
-    Hinge,    // 铰链
-    Fixed,     // 固定
-    Distance,  // 距离
-    Spring,    // 弹簧
-    Slider,    // 滑动
-    Point,     // 点约束
-    Cone       // 锥形
-};
+enum class JointType : uint8_t { Hinge, Fixed, Distance, Spring, Slider, Point, Cone };
 
 struct JointDesc {
-    JointType type;
+    JointType   type     = JointType::Fixed;
+    BodyHandle  bodyA    = InvalidBodyHandle;
+    BodyHandle  bodyB    = InvalidBodyHandle;
+    FVector3    anchorA{};
+    FVector3    anchorB{};
+    FVector3    axisA{0,1,0};
+    FVector3    axisB{0,1,0};
+    float       minDistance = 0.0f;
+    float       maxDistance = 0.0f;
+    float       stiffness   = 0.0f;
+    float       damping     = 0.0f;
+};
 
-    Rigidbody3D* bodyA;
-    Rigidbody3D* bodyB;
-
-    FVector3 anchorA;  // 本地锚点
-    FVector3 anchorB;
-
-    // 类型特定参数
-    float minDistance = 0.0f;    // Distance
-    float maxDistance = 0.0f;    // Distance
-    float stiffness = 0.0f;      // Spring
-    float damping = 0.0f;        // Spring
-    FVector3 axisA;               // Hinge/Slider
-    FVector3 axisB;
+struct RaycastHit {
+    bool        hit = false;
+    BodyHandle  body = InvalidBodyHandle;
+    FVector3    point{};
+    FVector3    normal{};
+    float       distance = 0.0f;
 };
 ```
 
 ---
 
-## 7. 特效系统（自研）
+## 8. Data-driven layer (R2)
 
-### 7.1 AYCloth - 布料/毛发
+R1 ships only hand-built `PhysSceneDesc`; R2 adds JSON serialization. **Defer to RES-1/RES-2 phases.**
 
-**使用 Verlet 积分**，适合布料和毛发模拟。
+Canonical layout JSON (R2, mirror `AYLayoutLoader` convention):
 
-```cpp
-class AYCloth {
-public:
-    struct Particle {
-        FVector3 position;        // 当前位置
-        FVector3 prevPosition;    // 上一步位置 (Verlet)
-        FVector3 acceleration;     // 加速度
-        float invMass;            // 质量倒数
-
-        void integrate(float deltaTime) {
-            FVector3 velocity = position - prevPosition;
-            prevPosition = position;
-            position = position + velocity + acceleration * deltaTime * deltaTime;
-            acceleration = FVector3::zero();
-        }
-    };
-
-    struct DistanceConstraint {
-        int p1, p2;
-        float restLength;
-        float stiffness = 1.0f;
-
-        void satisfy(std::vector<Particle>& particles) {
-            FVector3 diff = particles[p2].position - particles[p1].position;
-            float dist = diff.length();
-            if (dist < 0.0001f) return;
-
-            FVector3 correction = diff * ((dist - restLength) / dist) * 0.5f * stiffness;
-            particles[p1].position += correction;
-            particles[p2].position -= correction;
-        }
-    };
-
-    // ============== 模拟 ==============
-    void simulate(float deltaTime);
-
-    void addForce(const FVector3& force) {
-        for (auto& p : m_particles) {
-            p.acceleration += force * p.invMass;
-        }
+```json
+{
+  "version": 1,
+  "gravity": [0.0, -9.81, 0.0],
+  "bodies": [
+    {
+      "name": "ground",
+      "type": "Static",
+      "position": [0.0, 0.0, 0.0],
+      "colliders": [
+        { "shape": "Box", "halfExtents": [50.0, 0.1, 50.0], "material": { "friction": 0.8 } }
+      ]
     }
+  ],
+  "joints": []
+}
+```
 
-    void setWind(const FVector3& wind) { m_wind = wind; }
+Loader uses **nlohmann/json** (mirrors AYUI/AYResource conventions). Format decision checklist:
 
-    // ============== 形状 ==============
-    void setAsGrid(int rows, int cols, float spacing);
-    void addConstraint(int p1, int p2, float stiffness = 1.0f);
+- [ ] Ship format: JSON only, or JSON + cooked binary?
+- [ ] Versioning: schema version field, how to migrate?
+- [ ] Round-trip: serialize → deserialize → step → identical state?
 
-    // ============== 绑定 ==============
-    void pinParticle(int index, const FVector3& position);
+---
+
+## 9. Public API sketch
+
+```cpp
+namespace ayt::physics {
+
+enum class BackendKind : uint8_t { Null, Mock, DefaultJolt, DefaultBox2D };
+
+struct PhysicsBackendDescriptor {
+    BackendKind kind3D = BackendKind::DefaultJolt;   // null-mode if Jolt absent
+    BackendKind kind2D = BackendKind::Null;          // TBD
+    uint32_t    jobWorkerCount = 0;                  // 0 = max(1, hw_concurrency - 2); see §17.3
+    uint32_t    commandQueueCapacity = 1024;         // pow2; ring ≤ 64 KiB at 64 B/cmd
+    uint32_t    createPoolCapacity = 256;            // out-of-band create slots
+    uint32_t    maxDrainPerTick = 4096;
+    uint32_t    maxSyncQueriesPerFrame = 64;
+    uint32_t    maxBodies = 65536;                   // Jolt PhysicsSystem capacity
+    uint32_t    maxBodyPairs = 65536;
+    uint32_t    maxContactConstraints = 10240;
+    uint32_t    tempAllocatorBytes = 10u * 1024u * 1024u;
+    float       fixedDeltaTime = 1.0f / 60.0f;
+    int         maxSubSteps = 4;
+    bool        syncVelocitiesInSnapshot = true;
+    FVector3    gravity3D{0.0f, -9.81f, 0.0f};
+    FVector2    gravity2D{0.0f, -9.81f};
+};
+
+class PhysicsManager {
+public:
+    static std::unique_ptr<PhysicsManager> create(const PhysicsBackendDescriptor& desc);
+
+    PhysicsWorld3D* world3D() { return _world3D.get(); }
+    PhysicsWorld2D* world2D() { return _world2D.get(); }
+
+    PhysResult step(float deltaTime);          // enqueues + returns immediately
+    const PhysFrameSnapshot& fetchResults();   // game-thread read
+
+    void shutdown();
 
 private:
-    std::vector<Particle> m_particles;
-    std::vector<DistanceConstraint> m_constraints;
-    FVector3 m_wind;
-    int m_pinnedCount = 0;
+    PhysicsManager() = default;
+    std::unique_ptr<PhysicsWorld3D> _world3D;
+    std::unique_ptr<PhysicsWorld2D> _world2D;
+    std::unique_ptr<IPhysicsBackend3D> _backend3D;
+    std::unique_ptr<IPhysicsBackend2D> _backend2D;
+    std::unique_ptr<PhysicsCommandQueue> _queue;
+    std::thread _physicsThread;
+    // ... double-buffered snapshot
+};
+
+class PhysicsWorld3D {
+public:
+    // Creates return PhysResult; on Ok, outHandle is packed index+generation (valid for enqueue).
+    // On QueueFull / NoMemory, outHandle = Invalid*Handle.
+    PhysResult     createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle);
+    PhysResult     destroyRigidbody(BodyHandle h);
+    PhysResult     setRigidbodyTransform(BodyHandle h, const FVector3& p, const FQuaternion& r);
+    PhysResult     applyForce(BodyHandle h, const FVector3& f);
+    PhysResult     applyImpulse(BodyHandle h, const FVector3& impulse, const FVector3& point);
+
+    PhysResult     createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
+    PhysResult     destroyCollider(ColliderHandle h);
+
+    PhysResult     createJoint(const JointDesc& desc, JointHandle& outHandle);
+    PhysResult     destroyJoint(JointHandle h);
+
+    // Queries — dual path (§5.1). Async returns queryId; Sync fills outHit on calling thread after wait.
+    uint32_t       raycastAsync(const Ray& ray, uint32_t layerMask = 0xFFFFFFFFu);
+    uint32_t       overlapSphereAsync(const FVector3& center, float radius, uint32_t layerMask);
+    uint32_t       overlapBoxAsync(const FVector3& center, const FVector3& halfExtents, const FQuaternion& rot, uint32_t layerMask);
+
+    PhysResult     raycastSync(const Ray& ray, RaycastHit& outHit, uint32_t layerMask = 0xFFFFFFFFu);
+    PhysResult     overlapSphereSync(const FVector3& center, float radius, std::vector<BodyHandle>& out, uint32_t layerMask);
+
+    void wakeAll();
+    void sleepAll();
+
+private:
+    PhysicsWorld3D() = default;
+    friend class PhysicsManager;
+};
+
+class PhysicsWorld2D {
+    // Mirror of PhysicsWorld3D with FVector2 and 2D-specific joint types
+};
+
+} // namespace ayt::physics
+```
+
+---
+
+## 10. Determinism & dual physics paths
+
+> **Authority:** [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) §6.
+
+AYPhysics supports **two paths**:
+
+| Path | Backend | `SystemLane` | Typical use |
+|------|---------|--------------|-------------|
+| **Physics-A (default)** | Jolt `PhysicsWorld3D` | Present / Server-authoritative | Open world, ragdoll, vehicles, visual cloth, MMD skirts |
+| **Physics-B (Sim)** | Self-built deterministic subset (R3+, DET-07) | Sim | Lockstep, rollback, bit-exact replay |
+
+### 10.1 Hard rules
+
+1. **`LockstepSession::isActive()` returns true** → `PhysicsWorld3D::step()` MUST NOT call `JoltBackend3D`. Returns `PhysResult::Unsupported`. Caller (gameplay / Sim lane) uses `Physics-B` (R3+).
+2. **Jolt results** replicated to clients via `AYNetwork` server-authority model, **not** lockstep.
+3. **`RigidbodyComponent`** ECS bridge syncs to Jolt only when in `SystemLane::Present`; Sim-lane simulation has its own float transforms via `SimTransformComponent` (R3+).
+
+### 10.2 Detection (R1 stub)
+
+Until `AYGameLoop::LockstepSession` exists, expose a free function:
+
+```cpp
+namespace ayt::physics {
+// Stub: always false in R1; R3 wires to ayt::game::LockstepSession::isActive()
+bool isLockstepActive() noexcept;
+}
+```
+
+The `IPhysicsBackend3D` interface contract is: backend MAY refuse `step()` if `isLockstepActive()` is true; manager returns `PhysResult::Unsupported` to caller.
+
+### 10.3 Implementation priority
+
+| ID | Content | Depends on |
+|----|---------|------------|
+| DET-07 | `DetBroadphase` + Fixed AABB solver MVP | DET-01 (`AYMath::Fixed`) |
+| — | Jolt integration | None; orthogonal to lockstep |
+
+DET-07 is **product-triggered**; does NOT block AYPhysics R1 or `ENGINE-FOUNDATION-PLAN` Phase 0–2.
+
+---
+
+## 11. Engine integration
+
+### 11.1 Subsystem priority
+
+| Subsystem | Priority | Time | Responsibility |
+|-----------|----------|------|----------------|
+| `PhysicsSubSystem` | 700 (R1: stub; final value locked after E-1) | Scaled | `PhysicsManager::step(dt)` + `fetchResults()` |
+| `RendererSubSystem` | (existing) | Scaled | 3D + UI composite draw |
+| `EntitySubSystem` | (existing) | Scaled | ECS update |
+
+Priority 700 keeps physics **after** script / entity updates but **before** render frame submission (mirror `AYAudio` §0 "system priority 600+ reserved for Audio").
+
+### 11.2 Dependencies
+
+| Module | Relationship |
+|--------|--------------|
+| **AYCore** | REQUIRED: smart pointers, threading primitives |
+| **AYMath** | REQUIRED: `FVector3`, `FQuaternion`, `FMatrix4x4` |
+| **AYGameLoop** | REQUIRED: `ISubSystem`, frame deltaTime |
+| **AYEventSystem** | E-3 only: collision events via `EventBus` |
+| **AYEntity** | E-2 only: `RigidbodyComponent`, `ColliderComponent` |
+| **AYResource** | RES-2 only: `.physscene` asset loading |
+| **AYRenderer** | Optional: debug-draw line/shape submission |
+| **AYAnimation** | F1+: cloth / ragdoll / IK drives physics state |
+| **AYDevice** | INDEPENDENT (no window/input dependency) |
+| **Jolt** | OPTIONAL: `vcpkg jolt-physics`; absent → Null mode |
+
+### 11.3 Init / Shutdown order
+
+```
+AYApplication::startup()
+  → AYCore::initialize()
+  → AYMath::initialize()
+  → AYGameLoop::initialize()
+      → registers PhysicsSubSystem (priority 700)
+  → PhysicsSubSystem::initialize()
+      → PhysicsManager::create(descriptor)
+          → backend->start(...)
+          → physics thread spawns
+
+GameLoop::run()
+  → PhysicsSubSystem::update(dt)
+      → manager->step(dt)
+      → manager->fetchResults()  (publishes to ECS / event bus)
+
+GameLoop::shutdown()
+  → reverse order
+  → PhysicsSubSystem::shutdown()
+      → manager->shutdown()
+          → backend->stop()
+          → physics thread joins
+```
+
+### 11.4 Build integration
+
+```cmake
+# root CMakeLists.txt (current state: commented out per submodule convention)
+# add_subdirectory(AYRuntime/AYPhysics)
+```
+
+Activation deferred to R1 end (Step 5 of implementation plan).
+
+---
+
+## 12. Effects — Cloth / Fluid / Particle
+
+**Status:** R3+ deferred. R1 ships no implementations. This section documents **contracts**, not pseudo-code (correcting original design §7's Verlet inline code).
+
+### 12.1 Cloth (F-1, R3+)
+
+| Aspect | Contract |
+|---|---|
+| Algorithm | Verlet / PBD (TBD at F-1) |
+| Iteration | N constraint passes per step (configurable; default 8) |
+| Fixed step | Decoupled from physics step; `cloth.fixedDeltaTime` independent |
+| Wind | Per-particle external force application |
+| Skinning | Output: per-particle transforms → AYAnimation `BlendShape` / bone influence |
+
+Header (R1 placeholder, no .cpp until F-1):
+
+```cpp
+class Cloth {
+public:
+    struct Particle { FVector3 position; FVector3 prevPosition; float invMass; };
+    void integrate(float dt) = 0;
+    void addForce(const FVector3& force) = 0;
+    void pinParticle(uint32_t index, const FVector3& position) = 0;
+    size_t particleCount() const = 0;
+    const Particle* particles() const = 0;
 };
 ```
 
-### 7.2 AYFluid - 流体 (SPH)
+### 12.2 Fluid (F-2, R3+)
 
-**使用 SPH (Smoothed Particle Hydrodynamics)**。
+| Aspect | Contract |
+|---|---|
+| Algorithm | SPH (TBD at F-2) |
+| Neighbor query | Uniform grid (TBD; alternative: Z-order curve) |
+| Density model | TBD; default Müller 2003 |
+| Rendering | Output: position buffer (CPU → AYRenderer particle pass) |
 
 ```cpp
-class AYFluid {
+class Fluid {
 public:
-    struct FluidParticle {
-        FVector3 position;
-        FVector3 velocity;
-        FVector3 force;
-        float density;
-        float pressure;
-        float mass;
-    };
-
-    // ============== 参数 ==============
-    void setParticleRadius(float radius) { m_particleRadius = radius; }
-    void setRestDensity(float density) { m_restDensity = density; }
-    void setViscosity(float viscosity) { m_viscosity = viscosity; }
-    void setGasStiffness(float stiffness) { m_gasStiffness = stiffness; }
-
-    // ============== 模拟 ==============
-    void simulate(float deltaTime);
-
-    // 添加粒子
-    void emit(const FVector3& position, int count);
-
-    // 空间哈希加速邻居查询
-    void buildSpatialHash();
-
-private:
-    // SPH 参数
-    float m_particleRadius = 0.1f;
-    float m_restDensity = 1000.0f;
-    float m_viscosity = 0.01f;
-    float m_gasStiffness = 2000.0f;
-    float m_kernelRadius = 0.2f;
-
-    std::vector<FluidParticle> m_particles;
-
-    // 空间哈希 (加速邻居查询)
-    SpatialHash m_spatialHash;
+    void emit(const FVector3& position, uint32_t count) = 0;
+    void simulate(float dt) = 0;
+    const std::vector<FVector3>& positions() const = 0;
 };
 ```
 
-### 7.3 AYParticle - GPU 粒子
+### 12.3 Particle (F-3, R3+)
+
+| Aspect | Contract |
+|---|---|
+| Backend | CPU MVP (R3+); GPU compute (R4+) |
+| Max count | Configurable; default 100 000 |
+| Render | AYRenderer particle pass with billboard / mesh |
+| Culling | Frustum + distance; configurable |
 
 ```cpp
-class AYParticle {
+class ParticleSystem {
 public:
-    struct GPUParticle {
-        FVector4 position;   // xyz + lifetime
-        FVector4 velocity;   // xyz + scale
-        FVector4 color;     // rgba
-    };
-
-    struct Emitter {
-        std::string name;
-        FVector3 position;
-        FVector3 emitRate;      // 每秒发射数量
-        float emitProbability;   // 发射概率
-
-        std::vector<FVector4> initialVelocity;  // 初始速度范围
-        std::vector<FVector2> lifetimeRange;   // 生命周期范围
-        std::vector<FVector2> scaleRange;       // 缩放范围
-    };
-
-    // ============== 发射器 ==============
-    void addEmitter(Emitter emitter);
-    void removeEmitter(const std::string& name);
-
-    // ============== 更新 ==============
-    void emit(float deltaTime);
-    void update(float deltaTime);
-    void render(RenderContext* ctx);
-
-    // ============== GPU 缓冲区 ==============
-    GPUBuffer<GPUParticle>* getBuffer() { return &m_buffer; }
-
-private:
-    std::vector<Emitter> m_emitters;
-    GPUBuffer<GPUParticle> m_buffer;
-    int m_maxParticles = 100000;
-    int m_emitAccumulator = 0;
+    struct Emitter { /* ... */ };
+    void update(float dt) = 0;
+    void render(RenderContext* ctx) = 0;
 };
 ```
 
 ---
 
-## 8. 与其他模块的接口
+## 13. Editor integration
 
-### 8.1 与 AYAnimation
+**Status:** R3+ deferred. R1 ships no editor hooks.
 
-```
-AYAnimation 输出骨骼变换
-        ↓
-AYPhysics 接收骨骼位置
-        ↓
-设置刚体位置/动画物理混合
-```
-
-### 8.2 与 AYRenderer
-
-```
-AYPhysics 调试绘制
-        ↓
-DebugRenderer 输出线条/形状
-        ↓
-AYRenderer 渲染
-```
-
-### 8.3 确定性与双物理路径
-
-> **权威文档**：[`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) §6  
-> **ECS 分轨**：[`AYEntity/design.md`](../AYEntity/design.md) §14 (`SystemLane`)
-
-本模块默认后端为 **Jolt**。Jolt 适合服务器权威、视觉物理、复杂刚体与关节；**不能**作为跨平台 lockstep / 输入回放的仿真后端（求解器顺序、浮点、多线程与架构差异会导致分歧）。
-
-#### 两条路径
-
-| 路径 | 后端 | `SystemLane` | 典型用途 |
-|------|------|--------------|----------|
-| **Physics-A（默认）** | Jolt `PhysicsWorld3D` | **Present** 或**仅服务器**权威 | 开放世界、布娃娃、载具、布料/毛发（视觉）、MMD 裙摆等 |
-| **Physics-B（Sim）** | 自研确定性子集（DET-07） | **Sim** | 帧同步、rollback、bit-exact 回放 |
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Present / Server-authoritative                         │
-│  PhysicsWorld3D (Jolt) → float Transform / 网络复制      │
-└─────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────┐
-│  Sim (lockstep active)                                  │
-│  DetBroadphase + Fixed AABB/sweep — 不调用 Jolt          │
-│  → SimTransformComponent → Bridge → float Transform      │
-└─────────────────────────────────────────────────────────┘
-```
-
-#### 硬性规则
-
-1. **`LockstepSession` 激活时**，Sim 轨 **禁止** 调用 `PhysicsWorld3D` / Jolt API。
-2. Jolt 结果若需参与多人玩法，走 **服务器权威 + 状态复制**（`AYNetwork`），而非各端本地 Jolt lockstep。
-3. `RigidBodyComponent` 与 Jolt 刚体同步属于 **Physics-A**；玩法位移/碰撞判定在 lockstep 产品中应优先使用 **Physics-B** 或 Sim 逻辑，避免「视觉刚体」与「仿真状态」混用同一 float 变换。
-4. 与 `AYAnimation` 的混合（§8.1）仅限 **表现**（动画驱动刚体位置）；lockstep 命中判定使用 [`AYEntity` §14.5](../AYEntity/design.md#145-组件命名约定未来) 的 Sim 代理，不读蒙皮矩阵。
-
-#### 实现优先级（确定性）
-
-| ID | 内容 | 依赖 |
-|----|------|------|
-| DET-07 | `DetBroadphase` + Fixed AABB 解算 MVP | DET-01 (`AYMath::Fixed`) |
-| — | Jolt 集成 | 不依赖 DET；与 lockstep 正交 |
-
-DET-07 为**产品触发**（见 [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) §9），不阻塞 Jolt Phase 1 与 `ENGINE-FOUNDATION-PLAN` Phase 0–2。
+| Aspect | Contract |
+|---|---|
+| Inspector panel | `PhysicsBodyComponent` / `PhysicsColliderComponent` tree; live property edit |
+| Gizmos | Box / Sphere / Capsule wireframe; joint axis arrows |
+| Debug draw | `IPhysicsBackend::debugDraw(DebugRenderer*)` (R2+) |
+| Profiler | Broadphase / narrowphase / solver timing overlay (ED-3) |
+| Replay | Snapshot scrub via `PhysFrameSnapshot` history (R4+) |
 
 ---
 
-## 9. 目录结构
+## 14. Testing strategy
+
+Following `AYAudio` §9 + `AYEventSystem` §9 matrix convention.
+
+| Test | Backend | Validates |
+|------|---------|-----------|
+| `Test_PhysicsTypes.cpp` | None (CPU) | `PhysResult` enum / `toString`; invalid handle=0; pack/unpack helpers |
+| `Test_PhysicsCommandQueue.cpp` | None | SPSC round-trip; pow2 capacity; full-rejection; `sizeof(PhysicsCommand)<=64`; create-pool allocate/take; cross-thread (TSan) |
+| `Test_PhysicsHandles.cpp` | None | index+generation pack; destroy→reuse fails validation; invalid=0 |
+| `Test_PhysicsManager.cpp` | Null | create / shutdown / step / fetchResults / dual-world isolation; `QueueFull` / `NoMemory` propagation |
+| `Test_NullBackend3D.cpp` | Null | createRigidbody → step N → state-noop → destroy; async query id; sync query path |
+| `Test_MockBackend3D.cpp` | Mock | Compact command capture order; create-slot ids resolved; `inspectMockBackend()` |
+| `Test_PhysicsSnapshot.cpp` | Null/Mock | Sleeping body omitted; `alwaysSync` present; no dense-by-handle indexing |
+| `Test_PhysicsScene.cpp` (R2) | Null | JSON round-trip; handle resolve; mass / friction / restitution preserved |
+| `Test_JoltBackend3D.cpp` (R1.5) | Jolt | Box-on-Box friction; sphere on plane; joint stability |
+| `Bench_PhysicsStep.cpp` (R1.5) | Jolt | §17.2 budgets: 1k / 10k body step timing |
+| `Test_Determinism.cpp` (R3+) | DetBroadphase | Bit-exact across runs |
+
+**Rules:**
+
+- **R1 PR must pass** Null + Mock + CPU tests without Jolt installed; **must** assert compact command + generation handles.
+- **R1.5 blocked** until §17.8 checklist is checked in the PR description.
+- **TSan run** on `Test_PhysicsCommandQueue` cross-thread variant (R1.5).
+- **Determinism gate** (R3+): same inputs across two runs → identical bit-level snapshots.
+
+---
+
+## 15. Directory layout (target)
 
 ```
-AYPhysics/
-├── design.md
-├── CMakeLists.txt
-├── include/
-│   └── AYPhysics/
-│       ├── AYPhysics.h              # 主入口
-│       │
-│       ├── Core/
-│       │   ├── PhysicsManager.h       # 管理器
-│       │   ├── PhysicsWorld3D.h      # 3D 物理世界
-│       │   ├── PhysicsWorld2D.h      # 2D 物理世界
-│       │   ├── Rigidbody.h          # 刚体
-│       │   └── Collider.h           # 碰撞体
-│       │
-│       ├── Joints/
-│       │   ├── Joint.h
-│       │   ├── HingeJoint.h
-│       │   ├── FixedJoint.h
-│       │   ├── DistanceJoint.h
-│       │   └── SpringJoint.h
-│       │
-│       ├── Colliders/
-│       │   ├── BoxCollider.h
-│       │   ├── SphereCollider.h
-│       │   ├── CapsuleCollider.h
-│       │   ├── ConvexCollider.h
-│       │   └── MeshCollider.h
-│       │
-│       └── Effects/
-│           ├── AYCloth.h           # 布料/毛发
-│           ├── AYFluid.h           # 流体
-│           └── AYParticle.h         # 粒子
+AYRuntime/AYPhysics/
+├── design.md                          # this file (R0)
+├── CLAUDE.md                          # module AI rules (R0)
+├── README.md                          # status snapshot (R0)
+├── .gitignore                         # R0
+├── CMakeLists.txt                     # R1
 │
-└── src/
-    ├── AYPhysics.cpp
-    ├── PhysicsManager.cpp
-    ├── PhysicsWorld3D.cpp
-    ├── PhysicsWorld2D.cpp
-    ├── Rigidbody.cpp
-    ├── Collider.cpp
-    ├── Joint.cpp
-    ├── Effects/
-    │   ├── AYCloth.cpp
-    │   ├── AYFluid.cpp
-    │   └── AYParticle.cpp
-    └── Backend/
-        └── JoltBackend.h   # Jolt 后端封装
+├── AYPhysics.h                        # umbrella include
+│
+├── interface/
+│   ├── IPhysicsBackend.h              # base interface
+│   ├── IPhysicsBackend3D.h            # 3D interface
+│   ├── IPhysicsBackend2D.h            # 2D interface (placeholder R1)
+│   └── PhysicsScene.h                 # scene / ID space
+│
+├── include/
+│   ├── AYPhysicsTypes.h               # handles / PhysResult / descriptors
+│   ├── AYPhysicsManager.h             # public manager
+│   ├── AYPhysicsWorld3D.h             # 3D world API
+│   ├── AYPhysicsWorld2D.h             # 2D world API
+│   ├── AYPhysicsCommandQueue.h        # compact SPSC + CreatePool (public for tests)
+│   ├── AYPhysicsHandles.h             # pack/unpack index+generation helpers
+│   ├── AYPhysicsSubSystem.h           # GameLoop integration
+│   ├── AYPhysicsBackendTestAccess.h   # test-only inspection (mirror AYAudio)
+│   ├── AYPhysicsCloth.h               # R3+ placeholder
+│   ├── AYPhysicsFluid.h               # R3+ placeholder
+│   └── AYPhysicsParticle.h            # R3+ placeholder
+│
+├── backend/
+│   ├── NullBackend3D.{h,cpp}          # always
+│   ├── MockBackend3D.{h,cpp}          # always (test-only)
+│   ├── JoltBackend3D.{h,cpp}          # conditional on Jolt
+│   ├── NullBackend2D.{h,cpp}          # R1.5
+│   └── Box2DBackend2D.{h,cpp}         # R1.5+ (depends on 2D decision)
+│
+├── src/
+│   ├── AYPhysicsManager.cpp
+│   ├── AYPhysicsWorld3D.cpp
+│   ├── AYPhysicsWorld2D.cpp
+│   ├── AYPhysicsCommandQueue.cpp
+│   ├── AYPhysicsSubSystem.cpp
+│   └── Physics/
+│       ├── Rigidbody.cpp              # RigidbodyDesc impl
+│       ├── Collider.cpp               # ColliderDesc impl
+│       ├── Joint.cpp                  # JointDesc impl
+│       └── PhysicsScene.cpp           # scene + ID allocator
+│
+├── resource/
+│   └── .physscene.example.json        # R2 sample
+│
+├── docs/
+│   └── physics-events.md              # R2 collision event protocol
+│
+└── unittest/
+    ├── CMakeLists.txt
+    ├── main.cpp
+    ├── Test_PhysicsTypes.cpp
+    ├── Test_PhysicsHandles.cpp
+    ├── Test_PhysicsCommandQueue.cpp
+    ├── Test_PhysicsSnapshot.cpp
+    ├── Test_PhysicsManager.cpp
+    ├── Test_NullBackend3D.cpp
+    ├── Test_MockBackend3D.cpp
+    └── Bench_PhysicsStep.cpp          # R1.5; Jolt-only
 ```
 
 ---
 
-## 10. 实现优先级
+## 16. Delivery phases + Decisions log + Changelog
 
-### Phase 1: 核心
-- [ ] PhysicsManager
-- [ ] PhysicsWorld3D (Jolt)
-- [ ] Rigidbody (Box/Sphere/Capsule)
-- [ ] 基础碰撞检测
+### 16.1 Delivery phases
 
-### Phase 2: 完整碰撞
-- [ ] Convex/Concave Mesh
-- [ ] Heightfield
-- [ ] Raycast/Overlap 查询
+| Phase | Scope | Integration | Status |
+|-------|-------|-------------|--------|
+| **R0** | design.md + CLAUDE.md + README.md + .gitignore | None | ✅ |
+| **R0.1** | Perf contracts: compact cmd, generation handles, snapshot/query, §17 | None | ✅ this revision |
+| **R1** | Interfaces + Null/Mock + compact SPSC + create pool + Manager + handle/snapshot tests | None | ⏳ next |
+| **R1.5** | Jolt 3D real impl (**§17.8 gate**) + `Bench_PhysicsStep` | None | ⏳ |
+| **R2** | 2D backend decision + impl | None | ⏳ |
+| **R3** | `PhysicsSubSystem` + E-1 | GameLoop | ⏳ |
+| **R4** | `RigidbodyComponent` / ECS bridge | Entity | ⏳ |
+| **R5** | `.physscene` JSON + `AYResource` bridge | Resource | ⏳ |
+| **R6** | Determinism gate (DET-07 stub) | Lockstep | ⏳ |
+| **R7** | Effects (Cloth / Fluid / Particle) | None | ⏳ |
+| **R8** | Editor hooks | Editor | ⏳ |
 
-### Phase 3: 关节
-- [ ] Hinge Joint
-- [ ] Fixed Joint
-- [ ] Distance/Spring Joint
-- [ ] Character Controller
+### 16.2 Decisions log
 
-### Phase 4: 2D + 特效
-- [ ] PhysicsWorld2D
-- [ ] 2D/3D 坐标转换
-- [ ] AYCloth
-- [ ] AYFluid
-- [ ] AYParticle
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-07-20 | 3D backend = **Jolt** (locked) | Modern C++17, Zlib, ~5 MB, JobSystem — see §4.1 |
+| 2026-07-20 | 2D backend = **TBD** (Box2D vs Jolt-2D) | Decision gate before Phase C — see §4.2 |
+| 2026-07-20 | Threading = **SPSC + physics thread** | Mirror AYAudio API shape — see §4.4 |
+| 2026-07-20 | API style = **handles + `PhysResult`** | No raw pointers, no `void` writes — see §1.3, §7 |
+| 2026-07-20 | Jolt missing → **Null mode auto-fallback** | CI on machines without vcpkg still passes |
+| 2026-07-20 | Effects section = **contract only** | Concrete impls at F-1/F-2/F-3 |
+| 2026-07-20 | **Compact command + create pool** (locked) | Reject fat-all-descs; `sizeof(PhysicsCommand)<=64` — §5.2 |
+| 2026-07-20 | **Index+generation handles** (locked) | Detect UAF after destroy — §7.1 |
+| 2026-07-20 | **Sparse active-body snapshot** (locked) | Sleeping omitted unless `alwaysSync` — §5.3 |
+| 2026-07-20 | **Query dual-path Async/Sync** (locked) | Gameplay same-frame needs — §5.1 |
+| 2026-07-20 | **R1.5 gated on §17.8** | No Jolt ship without budgets + layer/allocator contracts |
 
-### Phase 5: 高级
-- [ ] Ragdoll
-- [ ] Vehicle
-- [ ] 优化/调试工具
+### 16.3 Changelog
 
-### Phase 6: 确定性碰撞（按需，DET-07）
-- [ ] `DetBroadphase` + Fixed AABB / sweep（**不**使用 Jolt）
-- [ ] 与 `AYEntity` `SystemLane::Sim` 集成
-
-> 与 Jolt Phase 1–5 **并行可选**；仅 lockstep / 回放产品需要时启动。
+| Date | Change |
+|------|--------|
+| 2026-07-20 | **v0.2 / R0.1** — Closed industrial-perf gaps: anti-goals for fat commands / gen-less handles / dense snapshots; §5.2 compact command + create pool; §5.3 sparse snapshot; §5.4 drain/backpressure/sync mailbox; §7.1 packed handles; query Async/Sync API; §17 Performance & Jolt contracts + R1.5 gate. |
+| 2026-07-20 | **R0 / v0.1** — 16-chapter industrial rewrite aligned with AYUI/AYAudio/AYRenderer; Goals/Anti-Goals; backend abstraction; SPSC; determinism §10. |
+| 2026-07-09 | Dual-path Physics-A/B summary (now §10). |
+| Earlier | Initial rigidbody / cloth / fluid / particle sketch (see git history). |
 
 ---
 
-## 11. 参考
+## 17. Performance & industrial contracts
 
-- [Engine determinism architecture](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B, DET-07
-- [AYEntity SystemLane](../AYEntity/design.md#14-simulation-vs-presentation-systemlane)
-- [Jolt Physics](https://jrouwe.github.io/JoltPhysics/)
-- [SPH Fluid Simulation](http://mmacklin.com/sphfluid.pdf)
-- [Verlet Integration](https://en.wikipedia.org/wiki/Verlet_integration)
-- NVIDIA Flex / HairWorks / TressFX
+> **Purpose:** Make “approach industrial-grade physics throughput” an enforceable design, not a slogan.  
+> **Gate:** R1 implements §17.1 + §17.4–§17.5 machinery (Null/Mock). R1.5 Jolt implementation **must not merge** until §17.8 checklist is green in the PR.
+
+### 17.1 Command & memory budgets (R1 normative)
+
+| Budget | Value | Notes |
+|---|---|---|
+| `sizeof(PhysicsCommand)` | **≤ 64 bytes** | `static_assert`; prefer ≤ 56 |
+| Default ring capacity | 1024 (pow2) | Ring RAM ≤ 64 KiB |
+| Create pool capacity | 256 slots default | Exhaustion → `NoMemory`, not silent drop |
+| Max drain / physics wake | 4096 | Safety cap |
+| Snapshot transform list | Awake ∪ AlwaysSync only | No dense `transforms[handleIndex]` |
+| Sync queries / frame (soft) | 64 | Excess → log warning; still serviced in order |
+
+### 17.2 Runtime performance targets (R1.5 acceptance)
+
+Measured on a mid-tier desktop reference (documented in bench log: CPU model, build config=RelWithDebInfo or Release, Jolt JobSystem workers = descriptor default). Gravity + mixed Box/Sphere stack; no debug draw.
+
+| Scenario | Bodies (dynamic) | Target | Hard fail |
+|---|---|---|---|
+| **P1 smoke** | 1 000 | `step` ≤ **2.0 ms** avg over 600 frames | avg > 4.0 ms |
+| **P2 industrial** | 10 000 | `step` ≤ **8.0 ms** avg over 600 frames | avg > 12.0 ms |
+| **P3 spike** | 10 000 + 64 sync raycasts/frame | frame physics wall ≤ **10.0 ms** avg | avg > 14.0 ms |
+
+Additional:
+
+- Sleeping fraction after settle ≥ 70% in P2 idle phase (validates sleep + sparse snapshot).
+- `queueRejectCount == 0` under scripted create rate ≤ 128 bodies/frame.
+- Benchmark binary: `Bench_PhysicsStep` (R1.5); numbers recorded in PR.
+
+Targets are **initial gates**, not marketing ceilings; tune upward only with measured evidence.
+
+### 17.3 Jolt integration contract (R1.5, single TU)
+
+All items live only in `backend/JoltBackend3D.cpp` (+ private `.h`). Public headers never include `<Jolt/Jolt.h>`.
+
+| Topic | Locked choice |
+|---|---|
+| **PhysicsSystem caps** | `maxBodies`, `maxBodyPairs`, `maxContactConstraints` from `PhysicsBackendDescriptor` (§9) |
+| **TempAllocator** | `TempAllocatorImpl` with `tempAllocatorBytes` (default 10 MiB) |
+| **JobSystem** | `JobSystemThreadPool`; worker count = `jobWorkerCount` or `max(1, hw_concurrency - 2)` |
+| **Body interface** | Prefer `BodyInterface` locking APIs on the physics thread; **no** game-thread `BodyLock` |
+| **ObjectLayer** | Map `PhysLayer` (≤ 32) → `JPH::ObjectLayer`; default table: Static/Dynamic/Character/Trigger/Debris |
+| **BroadPhaseLayer** | At least `BP_NON_MOVING` / `BP_MOVING`; `ObjectVsBroadPhaseLayerFilter` + `ObjectLayerPairFilter` implement `collideMask` |
+| **ContactListener** | Implemented; emit enter/stay/exit into snapshot `collisionEvents` (game thread consumes via E-3 bus later) |
+| **BodyActivationListener** | Optional R1.5; required before editor sleep viz (ED-3) |
+| **MotionQuality** | Default Discrete; `RigidbodyDesc.enableCCD == true` → LinearCast |
+| **CCD / character / vehicle** | Character + Vehicle = R2+ features; CCD flag only in R1.5 |
+| **Mesh / Heightfield cooking** | ConvexHull / TriangleMesh / Heightfield create payloads may grow; keep cooked data in create-pool extensions or resource handles — **never** inline into `PhysicsCommand` |
+| **Lockstep** | If `isLockstepActive()` → refuse `step` with `Unsupported` (§10) |
+
+### 17.4 Handle validation hot path
+
+- Backend keeps `vector<uint16_t> generation` (or packed slot) sized to `maxBodies`.
+- Mutators: decode handle → compare generation → `NotFound` on mismatch (no Jolt call).
+- Destroy: remove from Jolt, bump generation, push index to free list.
+
+### 17.5 Snapshot publish algorithm
+
+1. After `PhysicsSystem::Update`, iterate **active** bodies (Jolt active list / activation listener cache).
+2. Append `BodyTransform` for each active body; also for `alwaysSync` sleeping bodies (maintain a small side set).
+3. Optionally fill velocities when `syncVelocitiesInSnapshot`.
+4. Append async `queryResults` and drained `collisionEvents`.
+5. Atomic swap front/back. Game thread must not retain pointers across `fetchResults()`.
+
+### 17.6 Threading vs JobSystem
+
+```
+Game thread          Physics thread              Jolt worker threads
+    |                     |                              |
+    |-- tryPush cmd ----→ |                              |
+    |                     |-- drain ≤ budget             |
+    |                     |-- JobSystem::Update ~~~~~~~~>|
+    |                     |<~~~~~~~ jobs complete -------|
+    |                     |-- publish snapshot           |
+    |← fetchResults ------|                              |
+    |-- sync query wait -→| (mailbox)                    |
+```
+
+Workers **never** enqueue into the game SPSC. Only the physics thread owns command drain and snapshot publish.
+
+### 17.7 Explicit non-goals for R1 / R1.5 perf
+
+| Deferred | Until |
+|---|---|
+| GPU broadphase / CUDA | Not planned |
+| Soft body / ragdoll presets | R2+ |
+| Networked physics compression | `AYNetwork` |
+| Bit-exact lockstep via Jolt | Forbidden (§10); use Physics-B |
+| Sharing one JobSystem with renderer | TBD engine-wide; R1.5 uses physics-owned pool |
+
+### 17.8 R1.5 merge checklist (gate)
+
+PR description must tick:
+
+- [ ] `static_assert(sizeof(PhysicsCommand) <= 64)`
+- [ ] Create pool path used for all create* commands; no desc structs in ring slots
+- [ ] Generation handles validated on mutate/destroy
+- [ ] Snapshot omits sleeping (unless `alwaysSync`); no dense-by-handle array
+- [ ] Async + Sync query paths both tested
+- [ ] Jolt: ObjectLayer + BroadPhaseLayer filters + TempAllocator + JobSystem wired
+- [ ] ContactListener → snapshot events
+- [ ] `Bench_PhysicsStep` P1/P2 numbers attached (or justified waiver with hardware note)
+- [ ] Lockstep active → `PhysResult::Unsupported`
+- [ ] Public headers have **zero** `#include <Jolt/...>`
+
+### 17.9 Open perf questions (do not block R1)
+
+| ID | Question | Default if undecided |
+|---|---|---|
+| Q-P1 | Share JobSystem with engine-wide pool? | Physics-owned pool until engine provides one |
+| Q-P2 | Include velocities in snapshot by default? | **Yes** (`syncVelocitiesInSnapshot=true`); allow descriptor off for bandwidth |
+| Q-P3 | Soft max on `transforms.size()`? | Warn at `maxBodies * 0.9` active; do not truncate silently |
+| Q-P4 | 2D backend perf parity? | Decide with §4.2; Box2D likely single-threaded |
