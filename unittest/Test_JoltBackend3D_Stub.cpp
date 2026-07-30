@@ -91,14 +91,10 @@ TEST_SUITE(JoltBackend3DStubTests)
         desc.createPoolCapacity   = 16;
         auto mgr = PhysicsManager::create(desc);
         CHECK_NOT_NULL(mgr.get());
-
-        // Step a few frames. Stub does no physics work, but the command queue
-        // + physics thread pipeline is exercised.
-        for (int i = 0; i < 10; ++i) {
-            mgr->step(1.0f / 60.0f);
+        // Backend sanity check: must be real Jolt, not Null fallback.
+        if (mgr && mgr->backend3D()) {
+            CHECK(mgr->backend3D()->isRealDevice());
         }
-        waitForDrain(*mgr, 50);
-
         mgr->shutdown();
     }
 

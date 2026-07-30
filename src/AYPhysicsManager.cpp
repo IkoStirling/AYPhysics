@@ -134,14 +134,17 @@ const PhysFrameSnapshot& PhysicsManager::fetchResults() {
 }
 
 void PhysicsManager::publishSnapshot() {
-    // Atomic swap: back becomes front, previous front becomes new back (cleared).
+    // Atomic swap: the physics thread already wrote into the back buffer; publish
+    // it as front and recycle the old front as the next back (cleared).
     const uint32_t oldFront = _frontIndex.load(std::memory_order_relaxed);
-    const uint32_t newFront = oldFront ^ 1;
-    _snapshots[newFront].transforms.clear();
-    _snapshots[newFront].collisionEvents.clear();
-    _snapshots[newFront].queryResults.clear();
-    _snapshots[newFront].frameIndex = _frameIndex.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint32_t newFront = oldFront ^ 1u;
+    _snapshots[newFront].frameIndex =
+        _frameIndex.fetch_add(1, std::memory_order_relaxed) + 1;
     _frontIndex.store(newFront, std::memory_order_release);
+    _backIndex.store(oldFront, std::memory_order_release);
+    _snapshots[oldFront].transforms.clear();
+    _snapshots[oldFront].collisionEvents.clear();
+    _snapshots[oldFront].queryResults.clear();
 }
 
 void PhysicsManager::shutdown() {

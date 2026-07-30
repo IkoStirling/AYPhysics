@@ -14,6 +14,10 @@ add_executable(${TEST_TARGET}
     Test_NullBackend3D.cpp
     Test_MockBackend3D.cpp
     Test_JoltBackend3D_Stub.cpp
+    # R1.5b: real Jolt backend integration tests. Only built when Jolt is
+    # present (the file is empty otherwise — it relies on Test_JoltBackend3D_Stub
+    # for the no-Jolt regression path).
+    Test_JoltBackend3D.cpp
     # MockBackend3D.cpp provides the testaccess:: namespace symbols; the static
     # lib drops them when no consumer in the lib references them, so we add the
     # TU to the test target directly.
