@@ -185,7 +185,11 @@ Following the AYAudio §2 ✅ / TBD convention.
 | **Jolt** | ✅ **Chosen** | ~5 MB, modern C++17, Zlib license, multi-threaded JobSystem, comparable performance |
 | Custom rigidbody | ❌ Rejected | Engineering cost; Jolt covers all our needs |
 
-**Implementation:** vcpkg `jolt-physics` port (mirror `AYAudio` `find_path` + vcpkg fallback). If vcpkg port not present: `find_path(Jolt/Jolt.h)` with header-only fallback. If still missing: `AYPHYSICS_NO_JOLT=1` and JoltBackend3D excluded from build (Null-only mode for CI).
+**Implementation:** vcpkg `jolt-physics` port — note that vcpkg's CMake export name is **`Jolt`** (target `Jolt::Jolt`), NOT `joltphysics`. Three-tier fallback chain (see `CMakeLists.txt:56-99`):
+
+1. `find_package(Jolt CONFIG QUIET)` — vcpkg `jolt-physics:x64-windows` provides `share/Jolt/JoltConfig.cmake` with target `Jolt::Jolt`. Use when present.
+2. `find_path(Jolt/Jolt.h)` header-only fallback under `$VCPKG_ROOT/installed/x64-windows/include` or `${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include`, plus `find_library(JOLT_LIB NAMES Jolt)` — mirrors `AYAudio/CMakeLists.txt:48-68` miniaudio pattern.
+3. If both fail: `AYPHYSICS_BUILD_JOLT=OFF` → `AYPHYSICS_NO_JOLT=1` and `JoltBackend3D` TU excluded; `PhysicsManager` falls back to `NullBackend3D` for `kind3D == DefaultJolt` (R1 behaviour preserved).
 
 ### 4.2 2D backend: **TBD** (open)
 

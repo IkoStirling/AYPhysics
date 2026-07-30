@@ -13,6 +13,7 @@ add_executable(${TEST_TARGET}
     Test_PhysicsManager.cpp
     Test_NullBackend3D.cpp
     Test_MockBackend3D.cpp
+    Test_JoltBackend3D_Stub.cpp
     # MockBackend3D.cpp provides the testaccess:: namespace symbols; the static
     # lib drops them when no consumer in the lib references them, so we add the
     # TU to the test target directly.
@@ -36,6 +37,18 @@ target_compile_definitions(${TEST_TARGET} PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
 )
+
+# Forward AYPHYSICS_HAS_JOLT / AYPHYSICS_NO_JOLT from the AYPhysics target so
+# Test_JoltBackend3D_Stub.cpp's #if branches resolve to the same code path as
+# the backend that got linked. Without this the test TU sees NO_JOLT (default)
+# but links Jolt symbols from AYPhysics.lib, producing a runtime mismatch
+# where Stub_ManagerFallsBackToNullWhenNoJolt calls init3D() that actually
+# runs JPH::Factory::operator new against an uninitialised process state.
+if(AYPHYSICS_BUILD_JOLT)
+    target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_HAS_JOLT=1)
+else()
+    target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_NO_JOLT=1)
+endif()
 
 if(MSVC)
     target_compile_options(${TEST_TARGET} PRIVATE /W4 /wd4200)

@@ -31,7 +31,7 @@
 ## 架构决策（v1）
 
 ### Backend 选型
-- **3D 后端 = Jolt**（locked，见 design.md §4.1），通过 vcpkg `jolt-physics` 集成；若 vcpkg 未装，自动降级为 Null 模式（`AYPHYSICS_NO_JOLT=1`）
+- **3D 后端 = Jolt**（locked，见 design.md §4.1），通过 vcpkg `jolt-physics` 集成（vcpkg 端口名上游叫 `jolt-physics`，但 CMake config 导出名为 **`Jolt`** / target **`Jolt::Jolt`**——不要写 `find_package(joltphysics ...)` 或 `joltphysics::joltphysics`，那些名字不存在）；若 vcpkg 未装，自动降级为 Null 模式（`AYPHYSICS_NO_JOLT=1`）
 - **2D 后端 = TBD**（Box2D vs Jolt-2D，见 design.md §4.2），R1.5 决策
 - **2D / 3D 完全分离**：`IPhysicsBackend3D` / `IPhysicsBackend2D` 各自接口、各自 handle 空间（见 design.md §1.1 / §6）
 

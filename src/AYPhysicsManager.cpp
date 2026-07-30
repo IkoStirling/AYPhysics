@@ -11,6 +11,10 @@
 #include "MockBackend3D.h"
 #include "AYPhysicsBackendTestAccess.h"
 
+#if defined(AYPHYSICS_HAS_JOLT)
+#include "JoltBackend3D.h"
+#endif
+
 #include "ayplatform/Thread.h"
 
 namespace ayt::physics {
@@ -27,8 +31,15 @@ std::unique_ptr<IPhysicsBackend3D> createBackend3D(BackendKind kind,
         case BackendKind::Mock:
             return std::make_unique<MockBackend3D>();
         case BackendKind::DefaultJolt:
-            // R1: no Jolt yet; fall back to Null.
+#if defined(AYPHYSICS_HAS_JOLT)
+            // R1.5a: Jolt stub wired through the manager; R1.5b replaces the
+            // body of JoltBackend3D with the real Jolt integration.
+            return std::make_unique<JoltBackend3D>();
+#else
+            // Jolt not built (-DAVPHYSICS_BUILD_JOLT=OFF or vcpkg port missing);
+            // preserve R1 behaviour by falling back to Null.
             return std::make_unique<NullBackend3D>();
+#endif
         case BackendKind::DefaultBox2D:
             // 3D path; Box2D is 2D-only.
             return std::make_unique<NullBackend3D>();
