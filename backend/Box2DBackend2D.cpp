@@ -317,7 +317,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         bodyDef.angularVelocity   = d.angularVelocity.z;
         bodyDef.linearDamping     = d.linearDamping;
         bodyDef.angularDamping    = d.angularDamping;
-        bodyDef.gravityScale      = 1.0f;
+        bodyDef.gravityScale      = d.gravityScale;  // R6: creation-time gravity multiplier
         bodyDef.isAwake           = true;
         bodyDef.enableSleep       = true;
         bodyDef.isBullet          = d.enableCCD;  // A4: CCD wiring
@@ -410,6 +410,49 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
         b2Body_SetLinearVelocity(bodyId, b2Vec2{cmd.u.vec4.x, cmd.u.vec4.y});
         b2Body_SetAwake(bodyId, true);
+        return;
+    }
+
+    case CT::SetGravityScale: {
+        // R6: per-body gravity multiplier (0 = float, 1 = world default).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
+        b2Body_SetGravityScale(bodyId, cmd.u.vec4.x);
+        b2Body_SetAwake(bodyId, true);
+        return;
+    }
+
+    case CT::ApplyTorque: {
+        // R6: Z-axis torque (2D spin).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2BodyId id = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(id)) return;
+        b2Body_ApplyTorque(id, cmd.u.vec4.z, true);
+        return;
+    }
+
+    case CT::ApplyAngularImpulse: {
+        // R6: Z-axis angular impulse (2D spin kick).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2BodyId id = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(id)) return;
+        b2Body_ApplyAngularImpulse(id, cmd.u.vec4.z, true);
         return;
     }
 

@@ -44,6 +44,9 @@ enum class PhysicsCommandType : uint8_t {
     SleepAll              = 15,
     SetRigidbodyCollideMask = 16,
     SetRigidbodyVelocity  = 17,  // R2: runtime linear-velocity set (b2Body_SetLinearVelocity)
+    SetGravityScale       = 18,  // R6: per-body gravity multiplier (b2Body_SetGravityScale)
+    ApplyTorque           = 19,  // R6: Z-axis torque (b2Body_ApplyTorque)
+    ApplyAngularImpulse   = 20,  // R6: Z-axis angular impulse (b2Body_ApplyAngularImpulse)
 };
 
 using CreateSlotId = uint32_t;

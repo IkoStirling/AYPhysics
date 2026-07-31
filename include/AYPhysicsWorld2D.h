@@ -19,6 +19,9 @@ public:
     PhysResult applyForce(BodyHandle h, const ayt::math::FVector3& f);
     PhysResult applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse,
                             const ayt::math::FVector3& point);
+    // R6: Z-axis torque / angular impulse (2D spin).
+    PhysResult applyTorque(BodyHandle h, float torque);
+    PhysResult applyAngularImpulse(BodyHandle h, float angularImpulse);
 
     // P3: runtime toggle of a body's collide mask. Used by the bridge character
     // controller to phase through one-way platforms while rising. The new mask
@@ -52,6 +55,8 @@ public:
 
     // R2: set a dynamic/kinematic body's linear velocity directly (bypasses force/impulse).
     PhysResult setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v);
+    // R6: runtime per-body gravity multiplier (0 = float, 1 = world default).
+    PhysResult setGravityScale(BodyHandle h, float scale);
 
     void wakeAll();
     void sleepAll();

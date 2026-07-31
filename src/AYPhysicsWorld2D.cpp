@@ -98,6 +98,30 @@ PhysResult PhysicsWorld2D::applyImpulse(BodyHandle h, const ayt::math::FVector3&
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld2D::applyTorque(BodyHandle h, float torque) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::ApplyTorque;
+    cmd.body = h;
+    cmd.u.vec4.z = torque;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld2D::applyAngularImpulse(BodyHandle h, float angularImpulse) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::ApplyAngularImpulse;
+    cmd.body = h;
+    cmd.u.vec4.z = angularImpulse;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
 PhysResult PhysicsWorld2D::setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
@@ -292,6 +316,18 @@ PhysResult PhysicsWorld2D::setRigidbodyVelocity(BodyHandle h, const ayt::math::F
     cmd.type = PhysicsCommandType::SetRigidbodyVelocity;
     cmd.body = h;
     cmd.u.vec4.x = v.x; cmd.u.vec4.y = v.y; cmd.u.vec4.z = v.z;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld2D::setGravityScale(BodyHandle h, float scale) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetGravityScale;
+    cmd.body = h;
+    cmd.u.vec4.x = scale;
     if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
     return PhysResult::Ok;
 }

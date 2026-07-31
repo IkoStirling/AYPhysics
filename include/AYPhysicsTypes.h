@@ -81,6 +81,7 @@ struct RigidbodyDesc {
     float          mass           = 1.0f;
     float          linearDamping  = 0.05f;
     float          angularDamping = 0.05f;
+    float          gravityScale   = 1.0f;  // R6: per-body gravity multiplier (1 = world default)
     PhysMaterial   material{};
     bool           alwaysSync     = false;  // appears in snapshot even when sleeping
     bool           enableCCD      = false;

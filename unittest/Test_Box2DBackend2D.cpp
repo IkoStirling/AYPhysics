@@ -756,6 +756,115 @@ TEST_SUITE(Box2DBackend2DTests)
         mgr->shutdown();
     }
 
+    // ------------------------------------------------------------
+    // R6: setGravityScale / applyTorque / applyAngularImpulse
+    // ------------------------------------------------------------
+    TEST_CASE(Real_SetGravityScaleZeroFloats) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        auto makeBody = [&](float x, float gravityScaleAtCreate) -> BodyHandle {
+            BodyHandle h = InvalidBodyHandle;
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.position = ayt::math::FVector3(x, 10.0f, 0.0f);
+            rb.gravityScale = gravityScaleAtCreate;
+            rb.alwaysSync = true;
+            rb.linearDamping = 0.0f;
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Sphere; cd.radius = 0.1f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+            return h;
+        };
+        // Creation-time gravityScale=0 stays up; runtime set to 0 also works.
+        const BodyHandle atCreate = makeBody(-4.0f, 0.0f);
+        const BodyHandle runtime  = makeBody(-2.0f, 1.0f);
+        const BodyHandle falling  = makeBody( 2.0f, 1.0f);
+        waitForDrain2D(*mgr, 200);
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setGravityScale(runtime, 0.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+
+        for (int i = 0; i < 120; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 300);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float yCreate = 10.0f, yRuntime = 10.0f, yFall = 10.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == atCreate) yCreate = bt.position.y;
+            if (bt.body == runtime)  yRuntime = bt.position.y;
+            if (bt.body == falling)  yFall    = bt.position.y;
+        }
+        CHECK(yCreate > 9.0f);   // RigidbodyDesc.gravityScale=0 at creation
+        CHECK(yRuntime > 9.0f);  // runtime setGravityScale(0)
+        CHECK(yFall < 9.0f);     // normal gravity -> falls
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ApplyTorqueSpinsBody) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+        rb.fixedRotation = false;
+        rb.alwaysSync = true;
+        rb.angularDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.0f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+        waitForDrain2D(*mgr, 200);
+
+        for (int i = 0; i < 90; ++i) {
+            CHECK_INT_EQ(static_cast<uint32_t>(w->applyTorque(h, 8.0f)),
+                         static_cast<uint32_t>(PhysResult::Ok));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain2D(*mgr, 300);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float angle = 0.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == h)
+                angle = 2.0f * std::atan2(bt.rotation.z, bt.rotation.w);
+        }
+        CHECK(std::fabs(angle) > 0.5f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ApplyAngularImpulseSpinsBody) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+        rb.fixedRotation = false;
+        rb.alwaysSync = true;
+        rb.angularDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.0f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+        waitForDrain2D(*mgr, 200);
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->applyAngularImpulse(h, 3.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 300);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float wz = 0.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == h) wz = bt.angularVelocity.z;
+        }
+        CHECK(std::fabs(wz) > 0.1f);
+        mgr->shutdown();
+    }
+
 #else
 
     TEST_CASE(Stub_ManagerFallsBackToNullWhenNoBox2D) {
