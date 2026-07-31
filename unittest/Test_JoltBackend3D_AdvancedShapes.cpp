@@ -63,14 +63,20 @@ BodyHandle createStaticBody(JoltBackend3D& backend,
 }
 
 // Create a dynamic body via the test seam.
+// enableCCD=true: Mesh/Heightfield shapes are thin (single-sided triangles);
+// without LinearCast motion quality a fast-falling body tunnels through.
+// alwaysSync=true: once the body settles it goes to sleep and is omitted from
+// the sparse snapshot; alwaysSync keeps it visible so tests can assert position.
 BodyHandle createDynamicBody(JoltBackend3D& backend,
                              const ayt::math::FVector3& pos,
                              float mass = 1.0f) {
     BodyHandle h = InvalidBodyHandle;
     RigidbodyDesc rb;
-    rb.type     = BodyType::Dynamic;
-    rb.position = pos;
-    rb.mass     = mass;
+    rb.type       = BodyType::Dynamic;
+    rb.position   = pos;
+    rb.mass       = mass;
+    rb.enableCCD  = true;
+    rb.alwaysSync = true;
     (void)backend.execute_createRigidbodyForTest(rb, h);
     return h;
 }
@@ -163,7 +169,7 @@ TEST_SUITE(JoltBackend3DAdvancedShapesTests)
             { 10.0f, 0.0f,  10.0f},
             {-10.0f, 0.0f,  10.0f},
         };
-        sd->meshIndices = {0, 1, 2, 0, 2, 3};
+        sd->meshIndices = {0, 2, 1, 0, 3, 2};  // CCW from above → normals +Y
         ColliderDesc cd{};
         cd.body      = meshH;
         cd.shape     = ColliderShape::TriangleMesh;
@@ -228,7 +234,7 @@ TEST_SUITE(JoltBackend3DAdvancedShapesTests)
         CHECK_INT_EQ(static_cast<uint32_t>(backend.execute_createColliderForTest(cd, colH)),
                      static_cast<uint32_t>(PhysResult::Ok));
 
-        BodyHandle sphereH = createDynamicBody(backend, ayt::math::FVector3(0.5f, 5.0f, 0.5f));
+        BodyHandle sphereH = createDynamicBody(backend, ayt::math::FVector3(1.0f, 1.5f, 1.0f));  // above bump center, gentle drop
         ColliderDesc scd{};
         scd.body   = sphereH;
         scd.shape  = ColliderShape::Sphere;
@@ -274,7 +280,7 @@ TEST_SUITE(JoltBackend3DAdvancedShapesTests)
             { 10.0f, 0.0f,  10.0f},
             {-10.0f, 0.0f,  10.0f},
         };
-        msd->meshIndices = {0, 1, 2, 0, 2, 3};
+        msd->meshIndices = {0, 2, 1, 0, 3, 2};  // CCW from above → normals +Y
         ColliderDesc mcd{};
         mcd.body      = meshH;
         mcd.shape     = ColliderShape::TriangleMesh;

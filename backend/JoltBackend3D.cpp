@@ -24,6 +24,10 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>  // R2.0a
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>        // R2.0a
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h> // R2.0a
+#include <Jolt/Math/Float3.h>                              // R2.0a (MeshShape VertexList = Array<Float3>)
 #include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/CollisionCollector.h>
@@ -77,13 +81,25 @@ struct BPLayerInterface final : public JPH::BroadPhaseLayerInterfaceTable {
 };
 
 struct ObjLayerPairFilter final : public JPH::ObjectLayerPairFilterTable {
-    ObjLayerPairFilter() : JPH::ObjectLayerPairFilterTable(kMaxObjectLayers) {}
+    // ObjectLayerPairFilterTable defaults to ALL PAIRS DISABLED (zero-filled
+    // bit table). AYPhysics does fine-grained filtering via collideMask on
+    // CollisionGroup, so the object-layer filter must allow every pair by
+    // default — otherwise no 3D body ever collides (bodies fall through ground).
+    ObjLayerPairFilter() : JPH::ObjectLayerPairFilterTable(kMaxObjectLayers) {
+        for (uint32_t i = 0; i < kMaxObjectLayers; ++i) {
+            for (uint32_t j = 0; j < kMaxObjectLayers; ++j) {
+                EnableCollision(static_cast<JPH::ObjectLayer>(i),
+                                 static_cast<JPH::ObjectLayer>(j));
+            }
+        }
+    }
 };
 
 // ObjectVsBroadPhaseLayerFilterTable ctor signature (Jolt 5.5):
 //   ObjectVsBroadPhaseLayerFilterTable(BPLayerInterface&, numBPLayers,
 //                                       ObjectLayerPairFilter&, numObjLayers).
-// The default ctor enables all pairs, so we leave it as-is.
+// It derives its entries from the ObjectLayerPairFilter above, so now that
+// every object-layer pair is enabled, every object-vs-broadphase pair is too.
 struct ObjVsBPLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilterTable {
     ObjVsBPLayerFilter(const BPLayerInterface& bpIface, const ObjLayerPairFilter& pairFilter)
         : JPH::ObjectVsBroadPhaseLayerFilterTable(
@@ -152,7 +168,7 @@ private:
 };
 
 // =============================================================================
-// Shape factory (Box / Sphere / Capsule only — R1.5b)
+// Shape factory (R1.5b: Box / Sphere / Capsule; R2.0a: +ConvexHull/TriangleMesh/Heightfield)
 // =============================================================================
 JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
     using namespace JPH;
@@ -173,6 +189,64 @@ JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
         CapsuleShapeSettings s(halfHeight, desc.radius);
         auto r = s.Create();
         return r.IsValid() ? r.Get() : nullptr;
+    }
+    // ---- R2.0a: advanced shapes (cooking inputs via ColliderShapeData) ----
+    case ColliderShape::ConvexHull: {
+        const ColliderShapeData* sd = desc.shapeData.get();
+        if (!sd || sd->hullPoints.empty()) return nullptr;
+        // JPH::ConvexHullShape::cMaxPointsInHull = 256 (Jolt 5.5.0).
+        if (sd->hullPoints.size() > 256u) return nullptr;
+        Array<Vec3> pts((int)sd->hullPoints.size());
+        for (size_t i = 0; i < sd->hullPoints.size(); ++i) {
+            pts[i] = Vec3(sd->hullPoints[i].x, sd->hullPoints[i].y, sd->hullPoints[i].z);
+        }
+        ConvexHullShapeSettings settings(pts.begin(), (int)pts.size());
+        auto r = settings.Create();
+        if (!r.IsValid()) return nullptr;
+        return r.Get();
+    }
+    case ColliderShape::TriangleMesh: {
+        const ColliderShapeData* sd = desc.shapeData.get();
+        if (!sd || sd->meshVertices.empty()) return nullptr;
+        if (sd->meshIndices.size() < 3u || (sd->meshIndices.size() % 3u) != 0u) return nullptr;
+        // Convert FVector3 -> Float3 (Jolt's compact vertex type for mesh shape).
+        VertexList vl;
+        vl.reserve(sd->meshVertices.size());
+        for (const auto& v : sd->meshVertices) {
+            vl.push_back(Float3(v.x, v.y, v.z));
+        }
+        IndexedTriangleList tl;
+        tl.reserve(sd->meshIndices.size() / 3u);
+        for (size_t i = 0; i + 2u < sd->meshIndices.size(); i += 3u) {
+            // Jolt IndexedTriangle ctor: (i1, i2, i3, materialIndex, userData)
+            // materialIndex defaults to 0 (no material list on our side yet).
+            tl.push_back(IndexedTriangle(
+                sd->meshIndices[i + 0],
+                sd->meshIndices[i + 1],
+                sd->meshIndices[i + 2],
+                /*materialIndex*/ 0u,
+                /*userData*/ 0u));
+        }
+        MeshShapeSettings settings(std::move(vl), std::move(tl));
+        auto r = settings.Create();
+        if (!r.IsValid()) return nullptr;
+        return r.Get();
+    }
+    case ColliderShape::Heightfield: {
+        const ColliderShapeData* sd = desc.shapeData.get();
+        if (!sd || sd->heightGridN < 4u) return nullptr;
+        // Jolt requires sampleCount / mBlockSize >= 2 (default mBlockSize = 2),
+        // and heightSamples.size() == N*N exactly.
+        const size_t expected = (size_t)sd->heightGridN * (size_t)sd->heightGridN;
+        if (sd->heightSamples.size() != expected) return nullptr;
+        HeightFieldShapeSettings settings(
+            sd->heightSamples.data(),
+            Vec3::sZero(),  // offset (R2.0a: identity; future R2.5+ can offset)
+            Vec3(1.0f, 1.0f, 1.0f),  // scale (R2.0a: unit; future R2.5+ user-tunable)
+            sd->heightGridN);
+        auto r = settings.Create();
+        if (!r.IsValid()) return nullptr;
+        return r.Get();
     }
     default:
         return nullptr;
@@ -686,6 +760,27 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
 
         JPH::RefConst<JPH::Shape> shape = makeShape(d);
         if (shape == nullptr) { ++_notFoundCount; return; }
+
+        // R2.0a: JPH::MeshShape and JPH::HeightFieldShape both override
+        // MustBeStatic() = true (Jolt asserts otherwise). Verify the body
+        // is actually a Static motion type before we SetShape() — reject
+        // with NotFound (not a crash) if the caller asked for a static-only
+        // shape on a dynamic / kinematic body.
+        if (d.shape == ColliderShape::TriangleMesh ||
+            d.shape == ColliderShape::Heightfield) {
+            const JPH::BodyID bId = _impl->bodyIdByIndex[bodyIdx];
+            if (!bId.IsInvalid()) {
+                const JPH::BodyLockInterface& bli =
+                    _impl->physicsSystem->GetBodyLockInterface();
+                JPH::BodyLockRead lock(bli, bId);
+                if (!lock.Succeeded() ||
+                    lock.GetBody().GetMotionType() != JPH::EMotionType::Static) {
+                    ++_notFoundCount;
+                    return;
+                }
+            }
+        }
+
         _impl->shapeCache.push_back(shape);
         bi.SetShape(bodyId, shape.GetPtr(), /*inUpdateMassProperties*/ false,
                     JPH::EActivation::Activate);
