@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <memory>
 
 using namespace ayt::physics;
 using namespace ayt::physics::test_helpers;
@@ -652,6 +653,106 @@ TEST_SUITE(Box2DBackend2DTests)
         }
         CHECK(std::fabs(freeAngle) > 0.3f);     // tipped off the edge -> rotated
         CHECK(std::fabs(lockedAngle) < 0.05f);  // fixedRotation -> stayed axis-aligned
+        mgr->shutdown();
+    }
+
+    // ------------------------------------------------------------
+    // R5: ConvexHull collider + Point (mouse/tether) joint
+    // ------------------------------------------------------------
+    TEST_CASE(Real_ConvexHullColliderHasCollision) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        // Static floor.
+        {
+            BodyHandle h;
+            RigidbodyDesc rb; rb.type = BodyType::Static;
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(5.0f, 0.5f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        // Dynamic body with a ConvexHull collider: a 4-point box-equivalent
+        // hull built via b2ComputeHull + b2MakePolygon (NOT the Box shortcut),
+        // proving the hull path produces real collision geometry.
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+        rb.alwaysSync = true;
+        w->createRigidbody(rb, h);
+        auto shapeData = std::make_shared<ColliderShapeData>();
+        shapeData->hullPoints = {
+            ayt::math::FVector3(-0.5f, -0.5f, 0.0f),
+            ayt::math::FVector3( 0.5f, -0.5f, 0.0f),
+            ayt::math::FVector3( 0.5f,  0.5f, 0.0f),
+            ayt::math::FVector3(-0.5f,  0.5f, 0.0f),
+        };
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::ConvexHull;
+        cd.shapeData = shapeData;
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+
+        for (int i = 0; i < 240; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 300);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float y = 5.0f;
+        for (const BodyTransform& bt : snap.transforms)
+            if (bt.body == h) y = bt.position.y;
+        // Hull bottom (center.y - 0.5) rests on floor top (0.5) -> center.y ~ 1.0.
+        CHECK(y < 4.0f);   // fell
+        CHECK(y > 0.8f);   // resting on the floor, not through it
+        CHECK(y < 1.3f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_PointJointPullsBodyTowardTarget) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        // Static reference at the origin (motor joint target is relative to A).
+        BodyHandle aH = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb; rb.type = BodyType::Static;
+            rb.position = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
+            w->createRigidbody(rb, aH);
+        }
+        // Dynamic body pulled toward the target.
+        BodyHandle bH = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb; rb.type = BodyType::Dynamic;
+            rb.position = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
+            rb.alwaysSync = true;
+            rb.linearDamping = 0.0f;
+            w->createRigidbody(rb, bH);
+            ColliderDesc cd{};
+            cd.body = bH; cd.shape = ColliderShape::Sphere; cd.radius = 0.1f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        // Point = tether joint: drive bodyB toward world target (0, 5).
+        JointDesc jd{};
+        jd.type = JointType::Point;
+        jd.bodyA = aH; jd.bodyB = bH;
+        jd.anchorB = ayt::math::FVector3(0.0f, 5.0f, 0.0f);  // target
+        jd.stiffness = 1.0f;   // -> correctionFactor = 1.0 (snappy)
+        jd.damping = 0.5f;
+        JointHandle jh;
+        CHECK_INT_EQ(static_cast<uint32_t>(w->createJoint(jd, jh)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+
+        for (int i = 0; i < 180; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 300);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float y = 0.0f;
+        for (const BodyTransform& bt : snap.transforms)
+            if (bt.body == bH) y = bt.position.y;
+        // Motor joint drives B up toward y=5 against gravity; B rises well
+        // above its start and approaches the target.
+        CHECK(y > 2.0f);
+        CHECK(y < 5.5f);
         mgr->shutdown();
     }
 

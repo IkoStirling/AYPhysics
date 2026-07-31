@@ -490,6 +490,30 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             shapeId         = b2CreateCapsuleShape(bodyId, &shapeDef, &capsule);
             break;
         }
+        case ColliderShape::ConvexHull: {
+            // R5: 2D convex polygon from a point cloud. Project hullPoints
+            // (FVector3) onto the XY plane, compute the convex hull, and
+            // feed it to b2CreatePolygonShape. Box2D caps the hull at
+            // B2_MAX_POLYGON_VERTICES (8); b2ComputeHull welds close/collinear
+            // points but returns count < 3 on failure (too few points, all
+            // collinear, or the reduced hull would exceed 8 vertices).
+            // TriangleMesh / Heightfield are 3D-only and stay rejected here.
+            if (!d.shapeData || d.shapeData->hullPoints.size() < 3u) {
+                ++_notFoundCount;
+                return;
+            }
+            const auto& src = d.shapeData->hullPoints;
+            std::vector<b2Vec2> pts(src.size());
+            for (size_t i = 0; i < src.size(); ++i) {
+                pts[i] = b2Vec2{src[i].x, src[i].y};
+            }
+            const b2Hull hull =
+                b2ComputeHull(pts.data(), static_cast<int>(pts.size()));
+            if (hull.count < 3) { ++_notFoundCount; return; }
+            const b2Polygon poly = b2MakePolygon(&hull, 0.0f);
+            shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &poly);
+            break;
+        }
         default:
             ++_notFoundCount;
             return;
@@ -630,6 +654,33 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
                 jd.dampingRatio = d.damping > 0.0f ? d.damping : 1.0f;
             }
             jointId                = b2CreatePrismaticJoint(_impl->worldId, &jd);
+            break;
+        }
+        case JointType::Point: {
+            // R5: 2D Point = tether joint (design.md §14.3.3). A motor joint
+            // drives bodyB toward a target offset relative to bodyA. With
+            // bodyA static, this pulls bodyB to the world-space target
+            // (anchorB) on every step. (The mouse joint was considered but
+            // rejects this use: it pins bodyB's anchor AT the target at
+            // creation, so it holds bodyB at its start position and only
+            // drags when the target is moved each frame via SetTarget.)
+            // Cone is a 3D-only concept and stays rejected here.
+            b2MotorJointDef jd = b2DefaultMotorJointDef();
+            jd.bodyIdA      = bodyA;
+            jd.bodyIdB      = bodyB;
+            // Target = anchorB expressed in bodyA's local frame.
+            jd.linearOffset = b2Body_GetLocalPoint(bodyA, worldB);
+            // Preserve the current relative angle so the joint doesn't spin B.
+            jd.angularOffset = b2Rot_GetAngle(b2Body_GetRotation(bodyB)) -
+                               b2Rot_GetAngle(b2Body_GetRotation(bodyA));
+            jd.maxTorque = 0.0f;  // do not constrain rotation
+            const float massB = b2Body_GetMass(bodyB);
+            jd.maxForce = (massB > 0.0f) ? (1000.0f * massB) : 1.0e4f;
+            // stiffness -> correctionFactor (higher = snappier); clamp to [0,1].
+            jd.correctionFactor = d.stiffness > 0.0f
+                                  ? (d.stiffness < 1.0f ? d.stiffness : 1.0f)
+                                  : 0.5f;
+            jointId = b2CreateMotorJoint(_impl->worldId, &jd);
             break;
         }
         default:
