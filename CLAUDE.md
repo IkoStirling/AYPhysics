@@ -1,7 +1,7 @@
 # AYPhysics 项目 AI 工作注意事项
 
 > **注意**：AYPhysics 是独立子模块，遵循本文件定义的规则。AYTest 是独立测试框架库，位于 `AYTest/CLAUDE.md`。
-> **权威设计**：[`design.md`](design.md)（v0.2, 2026-07-20）。代码与 design.md 不一致时，design.md 优先。
+> **权威设计**：[`design.md`](design.md)（v0.3, 2026-07-30）。代码与 design.md 不一致时，design.md 优先。
 
 ## 重要规则
 
@@ -32,7 +32,8 @@
 
 ### Backend 选型
 - **3D 后端 = Jolt**（locked，见 design.md §4.1），通过 vcpkg `jolt-physics` 集成（vcpkg 端口名上游叫 `jolt-physics`，但 CMake config 导出名为 **`Jolt`** / target **`Jolt::Jolt`**——不要写 `find_package(joltphysics ...)` 或 `joltphysics::joltphysics`，那些名字不存在）；若 vcpkg 未装，自动降级为 Null 模式（`AYPHYSICS_NO_JOLT=1`）
-- **2D 后端 = TBD**（Box2D vs Jolt-2D，见 design.md §4.2），R1.5 决策
+- **2D 后端 = Box2D**（locked 2026-07-30，见 design.md §4.2），R2.5 与 R2 并行开发
+- **Box2D API 版本 = 3.x flat-API**（vcpkg `box2d:x64-windows` 当前装的版本）。**禁止**使用老版 Box2D 2.4 OO 风格：`b2World*` / `w->CreateBody()` / `b2Vec2(x,y)` 工厂函数 / `new`/`delete` 都是禁止的。R2.5 实现必须用 3.x：`b2CreateWorld` + `b2BodyId` / `b2ShapeId` / `b2JointId` 句柄（无 `*`）+ `b2Vec2{x,y}` aggregate init（POD）+ `b2World_Step(w, dt, subStepCount)` + `b2DestroyBody`/`b2DestroyWorld` 按 id 释放。详细对照表见 design.md §4.2。
 - **2D / 3D 完全分离**：`IPhysicsBackend3D` / `IPhysicsBackend2D` 各自接口、各自 handle 空间（见 design.md §1.1 / §6）
 
 ### 命令通道 / 性能硬规则（design §5 / §17）

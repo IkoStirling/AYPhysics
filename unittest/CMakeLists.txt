@@ -61,3 +61,42 @@ else()
 endif()
 
 add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+
+# R1.5c: standalone bench executable (NOT inside AYPhysics_Tests). Built only
+# when Jolt is available (the bench measures real Jolt timing — see design.md
+# §17.2 / §17.8 item 8). Numbers from this binary are recorded in
+# docs/perf_R15.md before the §17.8 gate can be ticked.
+if(AYPHYSICS_BUILD_JOLT)
+    set(BENCH_TARGET Bench_PhysicsStep)
+
+    add_executable(${BENCH_TARGET}
+        Bench_PhysicsStep.cpp
+    )
+
+    target_link_libraries(${BENCH_TARGET} PRIVATE
+        AYPhysics
+        AYMath
+        AYTime
+        AYPlatform
+    )
+
+    target_include_directories(${BENCH_TARGET} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backend
+    )
+
+    target_compile_definitions(${BENCH_TARGET} PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+        AYPHYSICS_HAS_JOLT=1
+    )
+
+    if(MSVC)
+        target_compile_options(${BENCH_TARGET} PRIVATE /W4 /wd4200)
+    else()
+        target_compile_options(${BENCH_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    # Not registered with add_test() — bench numbers belong in perf_R15.md,
+    # not in CI test results. Run manually with d:/tmp/build_ayphysics_jolt.bat.
+endif()

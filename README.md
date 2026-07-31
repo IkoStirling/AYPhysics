@@ -1,11 +1,11 @@
 # AYPhysics
 
-AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, 2D TBD).
+AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, Box2D for 2D).
 
-- **Authoritative design:** [`design.md`](design.md) (v0.2, 2026-07-20) — see §17 for perf / Jolt gate
+- **Authoritative design:** [`design.md`](design.md) (v0.3, 2026-07-30) — see §17 for perf / Jolt gate
 - **AI / dev rules:** [`CLAUDE.md`](CLAUDE.md)
-- **3D backend:** Jolt (locked); see design §4.1
-- **2D backend:** TBD (Box2D vs Jolt-2D); see design §4.2
+- **3D backend:** Jolt (locked, real impl via vcpkg `jolt-physics` 5.5.0); see design §4.1
+- **2D backend:** Box2D 3.x flat-API (locked, R2.5 parallel); see design §4.2 (legacy Box2D 2.4 OO style forbidden)
 
 ---
 
@@ -15,9 +15,12 @@ AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint
 |-------|-------|--------|
 | R0 | design.md + CLAUDE.md + README.md + .gitignore | ✅ |
 | R0.1 | Compact command, generation handles, sparse snapshot, §17 perf gate | ✅ |
-| R1 | Null/Mock + compact SPSC + create pool + Manager + handle/snapshot tests | ⏳ next |
-| R1.5 | Jolt 3D real impl (**§17.8 checklist required**) + benches | ⏳ |
-| R2 | 2D backend decision + impl | ⏳ |
+| R1 | Null/Mock + compact SPSC + create pool + Manager + handle/snapshot tests (111/111) | ✅ commit `8cabf84` |
+| R1.5a | `JoltBackend3D` stub + vcpkg three-tier fallback (126/126) | ✅ commit `54c2f7c` |
+| R1.5b | Real `JoltBackend3D` (Box/Sphere/Capsule + Hinge/Fixed/Distance + ContactListener + layer filters + JobSystem) — 172/172 | ✅ commit `8de0529` |
+| R1.5c | `Bench_PhysicsStep` (P1/P2/P3 + sleeping%) + §17.8 gate close | ⏳ next |
+| R2 | 3D ConvexHull/Mesh/Heightfield + ConeTwist/Point joints + BodyActivationListener (ragdoll unlock) | ⏳ |
+| R2.5 | `Box2DBackend2D` real impl + tilemap↔physics bridge (parallel to R2) | ⏳ |
 | R3 | `PhysicsSubSystem` + GameLoop integration | ⏳ |
 | R4 | `RigidbodyComponent` / ECS bridge | ⏳ |
 | R5 | `.physscene` JSON + `AYResource` bridge | ⏳ |
@@ -26,6 +29,8 @@ AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint
 | R8 | Editor hooks | 🅿 deferred |
 
 ✅ shipped · ⏳ planned · 🅿 deferred
+
+**Current capability (R1.5b):** Static/Dynamic/Kinematic bodies, Box/Sphere/Capsule colliders, Hinge/Fixed/Distance joints, ContactListener enter/stay/exit, sync+async raycast + sphere overlap, gravity + impulse + apply-force. **R2 unlocks:** ragdoll (ConvexHull + ConeTwist), terrain (Heightfield), Mesh triangles.
 
 ---
 
