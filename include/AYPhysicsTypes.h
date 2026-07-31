@@ -84,6 +84,7 @@ struct RigidbodyDesc {
     PhysMaterial   material{};
     bool           alwaysSync     = false;  // appears in snapshot even when sleeping
     bool           enableCCD      = false;
+    bool           fixedRotation  = false;  // R2: lock angular DOF (character controllers, top-down)
 };
 
 enum class ColliderShape : uint8_t {

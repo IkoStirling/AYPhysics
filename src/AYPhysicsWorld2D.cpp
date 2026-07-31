@@ -215,6 +215,21 @@ uint32_t PhysicsWorld2D::overlapSphereAsync(const ayt::math::FVector3& center, f
     return cmd.queryId;
 }
 
+uint32_t PhysicsWorld2D::overlapBoxAsync(const ayt::math::FVector3& center,
+                                        const ayt::math::FVector3& halfExtents,
+                                        PhysLayerMask layerMask) {
+    PhysicsManager* m = _manager;
+    if (!m) return 0;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::OverlapBoxAsync;
+    cmd.queryId = nextQueryId();
+    cmd.layerMask = layerMask;
+    cmd.u.box.cx = center.x; cmd.u.box.cy = center.y; cmd.u.box.cz = center.z;
+    cmd.u.box.hx = halfExtents.x; cmd.u.box.hy = halfExtents.y; cmd.u.box.hz = halfExtents.z;
+    if (!m->commandQueue2D()->tryPush(cmd)) return 0;
+    return cmd.queryId;
+}
+
 PhysResult PhysicsWorld2D::raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                                        PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
@@ -248,6 +263,37 @@ PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, 
     }
     out = resp.overlaps;
     return resp.status;
+}
+
+PhysResult PhysicsWorld2D::overlapBoxSync(const ayt::math::FVector3& center,
+                                          const ayt::math::FVector3& halfExtents,
+                                          std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->syncMailbox2D()) return PhysResult::InvalidState;
+    SyncQueryRequest req{};
+    req.type = SyncQueryType::OverlapBox;
+    req.requestId = nextQueryId();
+    req.layerMask = layerMask;
+    req.boxCenter = center;
+    req.boxHalfExtents = halfExtents;
+    SyncQueryResponse resp{};
+    if (!m->syncMailbox2D()->submitAndWait(req, resp, 1000 * 1000)) {
+        return PhysResult::BackendError;
+    }
+    out = resp.overlaps;
+    return resp.status;
+}
+
+PhysResult PhysicsWorld2D::setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetRigidbodyVelocity;
+    cmd.body = h;
+    cmd.u.vec4.x = v.x; cmd.u.vec4.y = v.y; cmd.u.vec4.z = v.z;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
 }
 
 void PhysicsWorld2D::wakeAll() {

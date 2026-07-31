@@ -10,6 +10,7 @@
 #include "Test_Box2DBackend2D_Helpers.h"
 
 #include <atomic>
+#include <cmath>
 
 using namespace ayt::physics;
 using namespace ayt::physics::test_helpers;
@@ -475,6 +476,183 @@ TEST_SUITE(Box2DBackend2DTests)
         }
         CHECK(bY > -100.0f);  // at least observed in snapshot
         backend.stop();
+    }
+
+    // ------------------------------------------------------------
+    // R1: overlap box (real rectangle, independent hx/hy)
+    // ------------------------------------------------------------
+    TEST_CASE(Real_OverlapBoxSyncRectangleNotSquare) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        auto makeStatic = [&](float x, float y) -> BodyHandle {
+            BodyHandle h = InvalidBodyHandle;
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            rb.position = ayt::math::FVector3(x, y, 0.0f);
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(0.1f, 0.1f, 0.0f);
+            ColliderHandle c;
+            w->createCollider(cd, c); (void)c;
+            return h;
+        };
+        const BodyHandle bx = makeStatic(3.0f, 0.0f);  // on +X axis
+        const BodyHandle by = makeStatic(0.0f, 3.0f);  // on +Y axis
+        for (int i = 0; i < 10; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+
+        // Wide-thin rectangle (hx=4, hy=0.2): catches bx, not by.
+        {
+            std::vector<BodyHandle> ov;
+            CHECK_INT_EQ(static_cast<uint32_t>(w->overlapBoxSync(
+                ayt::math::FVector3(0,0,0), ayt::math::FVector3(4.0f, 0.2f, 0.0f), ov)),
+                static_cast<uint32_t>(PhysResult::Ok));
+            bool hasBx = false, hasBy = false;
+            for (BodyHandle h : ov) { if (h == bx) hasBx = true; if (h == by) hasBy = true; }
+            CHECK(hasBx);
+            CHECK(!hasBy);
+        }
+        // Tall-thin rectangle (hx=0.2, hy=4): catches by, not bx.
+        {
+            std::vector<BodyHandle> ov;
+            w->overlapBoxSync(ayt::math::FVector3(0,0,0),
+                              ayt::math::FVector3(0.2f, 4.0f, 0.0f), ov);
+            bool hasBx = false, hasBy = false;
+            for (BodyHandle h : ov) { if (h == bx) hasBx = true; if (h == by) hasBy = true; }
+            CHECK(!hasBx);
+            CHECK(hasBy);
+        }
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_OverlapBoxAsyncReturnsBodies) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle bx = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            rb.position = ayt::math::FVector3(2.0f, 0.0f, 0.0f);
+            w->createRigidbody(rb, bx);
+            ColliderDesc cd{};
+            cd.body = bx; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(0.1f, 0.1f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        for (int i = 0; i < 10; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+
+        const uint32_t qid = w->overlapBoxAsync(
+            ayt::math::FVector3(0,0,0), ayt::math::FVector3(3.0f, 0.5f, 0.0f));
+        CHECK(qid != 0u);
+
+        // Async query results land in exactly one published snapshot, so poll
+        // fetchResults and inspect each frame's queryResults for our queryId.
+        bool foundQr = false, foundBody = false;
+        for (int poll = 0; poll < 40 && !foundQr; ++poll) {
+            mgr->step(1.0f / 60.0f);
+            ayt::platform::Thread::sleep(0.005f);
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const QueryResult& qr : snap.queryResults) {
+                if (qr.queryId != qid) continue;
+                foundQr = true;
+                CHECK(qr.hitCount >= 1u);
+                for (const RaycastHit& rh : qr.hits) if (rh.body == bx) foundBody = true;
+            }
+        }
+        CHECK(foundQr);
+        CHECK(foundBody);
+        mgr->shutdown();
+    }
+
+    // ------------------------------------------------------------
+    // R2: setRigidbodyVelocity + fixedRotation
+    // ------------------------------------------------------------
+    TEST_CASE(Real_SetRigidbodyVelocityOverridesGravity) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.position = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
+        rb.alwaysSync = true;
+        rb.linearDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Sphere; cd.radius = 0.1f;
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+        for (int i = 0; i < 10; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setRigidbodyVelocity(
+            h, ayt::math::FVector3(0.0f, 5.0f, 0.0f))), static_cast<uint32_t>(PhysResult::Ok));
+        for (int i = 0; i < 3; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float vy = -100.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == h) vy = bt.linearVelocity.y;
+        }
+        // Set to +5; gravity subtracts < 0.5 over 3 steps -> still clearly upward.
+        CHECK(vy > 4.0f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_FixedRotationLocksAngularVelocity) {
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        // Static ledge: top y=0.5, edges at x = +/-2.
+        {
+            BodyHandle h;
+            RigidbodyDesc rb; rb.type = BodyType::Static;
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(2.0f, 0.5f, 0.0f);
+            cd.material.friction = 0.0f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        // Box resting on the ledge with COM just past an edge -> contact torque
+        // tips it off. Initial angular velocity is 0; rotation comes only from
+        // the off-center contact, which fixedRotation (invInertia=0) rejects.
+        auto makeTipper = [&](bool fixed, float x) -> BodyHandle {
+            BodyHandle h = InvalidBodyHandle;
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.position = ayt::math::FVector3(x, 1.05f, 0.0f);
+            rb.fixedRotation = fixed;
+            rb.alwaysSync = true;
+            rb.angularDamping = 0.0f;
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.0f);
+            cd.material.friction = 0.0f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+            return h;
+        };
+        const BodyHandle free   = makeTipper(false,  2.3f);  // tips off right edge
+        const BodyHandle locked = makeTipper(true,  -2.3f);  // tips off left edge
+        for (int i = 0; i < 90; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 300);
+
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float freeAngle = 0.0f, lockedAngle = 0.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            const float a = 2.0f * std::atan2(bt.rotation.z, bt.rotation.w);
+            if (bt.body == free)   freeAngle   = a;
+            if (bt.body == locked) lockedAngle = a;
+        }
+        CHECK(std::fabs(freeAngle) > 0.3f);     // tipped off the edge -> rotated
+        CHECK(std::fabs(lockedAngle) < 0.05f);  // fixedRotation -> stayed axis-aligned
+        mgr->shutdown();
     }
 
 #else

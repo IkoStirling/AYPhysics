@@ -34,12 +34,24 @@ public:
     uint32_t   raycastAsync(const ayt::math::Ray& ray, PhysLayerMask layerMask = 0xFFFFFFFFu);
     uint32_t   overlapSphereAsync(const ayt::math::FVector3& center, float radius,
                                   PhysLayerMask layerMask = 0xFFFFFFFFu);
+    // R1: axis-aligned box overlap (independent half-extents; no rotation).
+    uint32_t   overlapBoxAsync(const ayt::math::FVector3& center,
+                               const ayt::math::FVector3& halfExtents,
+                               PhysLayerMask layerMask = 0xFFFFFFFFu);
 
     PhysResult raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                            PhysLayerMask layerMask = 0xFFFFFFFFu);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);
+    // R1: axis-aligned box overlap (independent half-extents; no rotation).
+    PhysResult overlapBoxSync(const ayt::math::FVector3& center,
+                              const ayt::math::FVector3& halfExtents,
+                              std::vector<BodyHandle>& out,
+                              PhysLayerMask layerMask = 0xFFFFFFFFu);
+
+    // R2: set a dynamic/kinematic body's linear velocity directly (bypasses force/impulse).
+    PhysResult setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v);
 
     void wakeAll();
     void sleepAll();

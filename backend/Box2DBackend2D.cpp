@@ -321,6 +321,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         bodyDef.isAwake           = true;
         bodyDef.enableSleep       = true;
         bodyDef.isBullet          = d.enableCCD;  // A4: CCD wiring
+        bodyDef.fixedRotation     = d.fixedRotation;  // R2: lock angular DOF
         bodyDef.userData          = handleToUserData(cmd.body);
 
         const b2BodyId bodyId = b2CreateBody(_impl->worldId, &bodyDef);
@@ -393,6 +394,22 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             if (!B2_ID_EQUALS(b2Shape_GetBody(shapeId), bodyId)) continue;
             b2Shape_SetFilter(shapeId, filter);
         }
+        return;
+    }
+
+    case CT::SetRigidbodyVelocity: {
+        // R2: set linear velocity directly. Wakes the body so a sleeping body
+        // actually starts moving this step.
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
+        b2Body_SetLinearVelocity(bodyId, b2Vec2{cmd.u.vec4.x, cmd.u.vec4.y});
+        b2Body_SetAwake(bodyId, true);
         return;
     }
 
@@ -712,16 +729,17 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
     }
 
     case CT::OverlapBoxAsync: {
-        // A3: 2D box overlap. Command packs center+radius (R1 limit); use radius
-        // as a half-extent proxy so the AABB query still works.
+        // R1: 2D box overlap as a real axis-aligned rectangle (independent hx/hy),
+        // not the old square proxy that reused the sphere payload.
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
         filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
-        const b2Vec2 center{cmd.u.sphere.cx, cmd.u.sphere.cy};
-        const float  he      = cmd.u.sphere.radius;
+        const b2Vec2 center{cmd.u.box.cx, cmd.u.box.cy};
+        const float  hx = cmd.u.box.hx >= 0.0f ? cmd.u.box.hx : 0.0f;
+        const float  hy = cmd.u.box.hy >= 0.0f ? cmd.u.box.hy : 0.0f;
         b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - he, center.y - he};
-        aabb.upperBound = b2Vec2{center.x + he, center.y + he};
+        aabb.lowerBound = b2Vec2{center.x - hx, center.y - hy};
+        aabb.upperBound = b2Vec2{center.x + hx, center.y + hy};
 
         QueryResult qr{};
         qr.queryId = cmd.queryId;
@@ -835,15 +853,17 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         return;
     }
     case SyncQueryType::OverlapBox: {
-        // R1 packs center+radius only; reuse sphere AABB with radius as half-extent.
+        // R1: real axis-aligned rectangle (independent hx/hy) from the box request
+        // fields, not the old sphere-payload square proxy.
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);
         filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
-        const b2Vec2 center{request.sphereCenter.x, request.sphereCenter.y};
-        const float  he      = request.sphereRadius > 0.0f ? request.sphereRadius : 0.5f;
+        const b2Vec2 center{request.boxCenter.x, request.boxCenter.y};
+        const float  hx = request.boxHalfExtents.x >= 0.0f ? request.boxHalfExtents.x : 0.0f;
+        const float  hy = request.boxHalfExtents.y >= 0.0f ? request.boxHalfExtents.y : 0.0f;
         b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - he, center.y - he};
-        aabb.upperBound = b2Vec2{center.x + he, center.y + he};
+        aabb.lowerBound = b2Vec2{center.x - hx, center.y - hy};
+        aabb.upperBound = b2Vec2{center.x + hx, center.y + hy};
 
         struct Ctx { Box2DBackend2D::Impl* impl; std::vector<BodyHandle>* out; };
         Ctx ctx{_impl.get(), &outResponse.overlaps};

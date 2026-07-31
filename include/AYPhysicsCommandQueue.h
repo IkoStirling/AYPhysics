@@ -43,6 +43,7 @@ enum class PhysicsCommandType : uint8_t {
     WakeAll               = 14,
     SleepAll              = 15,
     SetRigidbodyCollideMask = 16,
+    SetRigidbodyVelocity  = 17,  // R2: runtime linear-velocity set (b2Body_SetLinearVelocity)
 };
 
 using CreateSlotId = uint32_t;
@@ -72,6 +73,7 @@ struct PhysicsCommand {
         struct { float px, py, pz, qx, qy, qz, qw; } xform;
         struct { float ox, oy, oz, dx, dy, dz; } ray;
         struct { float cx, cy, cz, radius; } sphere;
+        struct { float cx, cy, cz, hx, hy, hz; } box;  // R1: overlap box center + half-extents (AABB, no rotation)
     } u{};
 };
 
