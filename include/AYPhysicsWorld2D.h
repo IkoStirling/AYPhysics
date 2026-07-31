@@ -20,6 +20,11 @@ public:
     PhysResult applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse,
                             const ayt::math::FVector3& point);
 
+    // P3: runtime toggle of a body's collide mask. Used by the bridge character
+    // controller to phase through one-way platforms while rising. The new mask
+    // replaces RigidbodyDesc::collideMask for all shapes on the body.
+    PhysResult setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask);
+
     PhysResult createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult destroyCollider(ColliderHandle h);
 

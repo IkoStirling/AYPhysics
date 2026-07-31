@@ -372,6 +372,30 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         return;
     }
 
+    case CT::SetRigidbodyCollideMask: {
+        // P3: update the per-body collide mask and re-apply it to every shape
+        // currently attached to the body (so existing colliders pick up the new
+        // filter immediately, and any future collider inherits it).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        _impl->bodyCollideMask[idx] = cmd.layerMask;
+        const b2Filter filter =
+            makeB2Filter(_impl->bodyLayer[idx], _impl->bodyCollideMask[idx]);
+        const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(bodyId)) return;
+        for (uint32_t sIdx = 1u; sIdx < _impl->maxBodies; ++sIdx) {
+            const b2ShapeId shapeId = _impl->shapeIdByIndex[sIdx];
+            if (!b2Shape_IsValid(shapeId)) continue;
+            if (!B2_ID_EQUALS(b2Shape_GetBody(shapeId), bodyId)) continue;
+            b2Shape_SetFilter(shapeId, filter);
+        }
+        return;
+    }
+
     case CT::ApplyForce: {
         const uint32_t idx = handleIndex(cmd.body);
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
@@ -621,6 +645,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
     case CT::RaycastAsync: {
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
 
         const b2Vec2 origin{cmd.u.ray.ox, cmd.u.ray.oy};
         b2Vec2 dir{cmd.u.ray.dx, cmd.u.ray.dy};
@@ -656,6 +681,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         // A3: 2D overlap = AABB query around the sphere's AABB.
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
         const b2Vec2 center{cmd.u.sphere.cx, cmd.u.sphere.cy};
         const float  r       = cmd.u.sphere.radius;
         b2AABB aabb{};
@@ -690,6 +716,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         // as a half-extent proxy so the AABB query still works.
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
         const b2Vec2 center{cmd.u.sphere.cx, cmd.u.sphere.cy};
         const float  he      = cmd.u.sphere.radius;
         b2AABB aabb{};
@@ -758,6 +785,7 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
     case SyncQueryType::Raycast: {
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
 
         const b2Vec2 origin{request.ray.origin.x, request.ray.origin.y};
         b2Vec2 dir{request.ray.dir.x, request.ray.dir.y};
@@ -786,6 +814,7 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
     case SyncQueryType::OverlapSphere: {
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
         const b2Vec2 center{request.sphereCenter.x, request.sphereCenter.y};
         const float  r       = request.sphereRadius;
         b2AABB aabb{};
@@ -809,6 +838,7 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         // R1 packs center+radius only; reuse sphere AABB with radius as half-extent.
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);
+        filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
         const b2Vec2 center{request.sphereCenter.x, request.sphereCenter.y};
         const float  he      = request.sphereRadius > 0.0f ? request.sphereRadius : 0.5f;
         b2AABB aabb{};

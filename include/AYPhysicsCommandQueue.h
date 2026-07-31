@@ -42,6 +42,7 @@ enum class PhysicsCommandType : uint8_t {
     OverlapBoxAsync       = 13,
     WakeAll               = 14,
     SleepAll              = 15,
+    SetRigidbodyCollideMask = 16,
 };
 
 using CreateSlotId = uint32_t;

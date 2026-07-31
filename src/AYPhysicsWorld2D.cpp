@@ -98,6 +98,18 @@ PhysResult PhysicsWorld2D::applyImpulse(BodyHandle h, const ayt::math::FVector3&
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld2D::setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type      = PhysicsCommandType::SetRigidbodyCollideMask;
+    cmd.body      = h;
+    cmd.layerMask = newMask;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
 PhysResult PhysicsWorld2D::createCollider(const ColliderDesc& desc, ColliderHandle& outHandle) {
     outHandle = InvalidColliderHandle;
     PhysicsManager* m = _manager;
