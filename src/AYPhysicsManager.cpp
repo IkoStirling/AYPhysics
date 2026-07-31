@@ -15,6 +15,10 @@
 #include "JoltBackend3D.h"
 #endif
 
+#if defined(AYPHYSICS_HAS_BOX2D)
+#include "Box2DBackend2D.h"
+#endif
+
 #include "ayplatform/Thread.h"
 
 namespace ayt::physics {
@@ -51,10 +55,15 @@ std::unique_ptr<IPhysicsBackend3D> createBackend3D(BackendKind kind,
 std::unique_ptr<IPhysicsBackend2D> createBackend2D(BackendKind kind) {
     switch (kind) {
         case BackendKind::Null:
-        case BackendKind::DefaultBox2D:        // R1: no Box2D yet
-        case BackendKind::DefaultJolt:         // Jolt-2D is R1.5
-        case BackendKind::Mock:                // R1: no Mock-2D
+        case BackendKind::Mock:
+        case BackendKind::DefaultJolt:
             return std::make_unique<NullBackend2D>();
+        case BackendKind::DefaultBox2D:
+#if defined(AYPHYSICS_HAS_BOX2D)
+            return std::make_unique<Box2DBackend2D>();
+#else
+            return std::make_unique<NullBackend2D>();
+#endif
     }
     return nullptr;
 }
@@ -87,21 +96,30 @@ std::unique_ptr<PhysicsManager> PhysicsManager::create(const PhysicsBackendDescr
         testaccess::setCurrentMock(static_cast< ::ayt::physics::MockBackend3D*>(nullptr));
     }
 
-    // Queues.
-    mgr->_queue      = std::make_unique<PhysicsCommandQueue>();
-    mgr->_createPool = std::make_unique<PhysicsCreatePool>();
-    mgr->_syncMailbox = std::make_unique<SyncQueryMailbox>();
+    // Queues (3D + 2D use independent SPSC rings; Step lives on the 3D queue).
+    mgr->_queue       = std::make_unique<PhysicsCommandQueue>();
+    mgr->_queue2D     = std::make_unique<PhysicsCommandQueue>();
+    mgr->_createPool  = std::make_unique<PhysicsCreatePool>();
+    mgr->_syncMailbox  = std::make_unique<SyncQueryMailbox>();
+    mgr->_syncMailbox2D = std::make_unique<SyncQueryMailbox>();
     if (!mgr->_queue->initialize(desc.commandQueueCapacity)) return nullptr;
+    if (!mgr->_queue2D->initialize(desc.commandQueueCapacity)) return nullptr;
     if (!mgr->_createPool->initialize(desc.createPoolCapacity)) return nullptr;
     if (!mgr->_syncMailbox->initialize(kSyncQueryMailboxCapacity)) return nullptr;
+    if (!mgr->_syncMailbox2D->initialize(kSyncQueryMailboxCapacity)) return nullptr;
 
-    // Start backend (physics thread will own; but start() is called here so we
-    // can fail-fast on init).
+    // Start backends (physics thread will own; start here for fail-fast).
     PhysicsBackendInfo info = mgr->_backend3D->describe();
     info.maxBodies = desc.maxBodies;
-    info.maxColliders = desc.maxBodies * 2;       // heuristic; refined in R1.5
+    info.maxColliders = desc.maxBodies * 2;
     info.maxJoints    = desc.maxBodies;
     if (!mgr->_backend3D->start(info)) return nullptr;
+
+    PhysicsBackendInfo info2D = mgr->_backend2D->describe();
+    info2D.maxBodies = desc.maxBodies;
+    info2D.maxColliders = desc.maxBodies * 2;
+    info2D.maxJoints    = desc.maxBodies;
+    if (!mgr->_backend2D->start(info2D)) return nullptr;
 
     // World3D + World2D get manager back-pointers (lifetime owned by manager).
     mgr->_world3D = std::unique_ptr<PhysicsWorld3D>(new PhysicsWorld3D());
@@ -152,9 +170,11 @@ void PhysicsManager::shutdown() {
     if (_physicsThread.joinable()) _physicsThread.join();
     if (_backend3D) _backend3D->stop();
     if (_backend2D) _backend2D->stop();
-    if (_queue)      _queue->shutdown();
-    if (_createPool) _createPool->shutdown();
-    if (_syncMailbox)_syncMailbox->shutdown();
+    if (_queue)       _queue->shutdown();
+    if (_queue2D)     _queue2D->shutdown();
+    if (_createPool)  _createPool->shutdown();
+    if (_syncMailbox) _syncMailbox->shutdown();
+    if (_syncMailbox2D) _syncMailbox2D->shutdown();
     testaccess::setCurrentMock(nullptr);
 }
 
@@ -191,25 +211,41 @@ void PhysicsManager::_physicsThreadMain() {
             ++drained;
         }
 
-        // Drain sync-query mailbox between commands and step.
+        uint32_t drained2D = 0;
+        while (drained2D < _descriptor.maxDrainPerTick &&
+               _queue2D->tryPop(cmd)) {
+            PhysicsCreatePayload payload{};
+            const PhysicsCreatePayload* pPayload = nullptr;
+            if (cmd.type == PhysicsCommandType::CreateRigidbody ||
+                cmd.type == PhysicsCommandType::CreateCollider ||
+                cmd.type == PhysicsCommandType::CreateJoint) {
+                if (cmd.createSlot != InvalidCreateSlotId &&
+                    _createPool->take(cmd.createSlot, payload)) {
+                    pPayload = &payload;
+                }
+            }
+            if (_backend2D) _backend2D->execute(cmd, pPayload);
+            ++drained2D;
+        }
+
         if (_syncMailbox && _backend3D) {
             _syncMailbox->serviceAll(static_cast<IPhysicsBackend*>(_backend3D.get()));
         }
+        if (_syncMailbox2D && _backend2D) {
+            _syncMailbox2D->serviceAll(static_cast<IPhysicsBackend*>(_backend2D.get()));
+        }
 
-        if (sawStep && _backend3D) {
-            _backend3D->step(lastDt);
+        if (sawStep) {
+            if (_backend3D) _backend3D->step(lastDt);
+            if (_backend2D) _backend2D->step(lastDt);
             PhysFrameSnapshot& back = _snapshots[_backIndex.load(std::memory_order_relaxed)];
             back.stepSeconds = lastDt;
-            _backend3D->publishSnapshot(back);
+            if (_backend3D) _backend3D->publishSnapshot(back);
+            if (_backend2D) _backend2D->publishSnapshot(back);
             publishSnapshot();
         }
 
-        // Idle backoff: yield the OS thread instead of microsecond sleeps.
-        // Rationale: Thread::sleep(float seconds) only delivers ms granularity,
-        // and a 50 us chrono sleep on Windows resolves to a 1 ms+ OS quantum
-        // anyway. Yield is the canonical spin-wait primitive for SPSC ring
-        // consumption; for the multi-ms level we let OS scheduling kick in.
-        if (drained == 0 && !sawStep) {
+        if (drained == 0 && drained2D == 0 && !sawStep) {
             ayt::platform::Thread::yield();
         }
     }

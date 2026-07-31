@@ -11,6 +11,7 @@
 #include "AYPhysicsHandles.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "aymath/MathTypes.h"
@@ -89,9 +90,23 @@ enum class ColliderShape : uint8_t {
     Box          = 0,
     Sphere       = 1,
     Capsule      = 2,
-    ConvexHull   = 3,
-    TriangleMesh = 4,
-    Heightfield  = 5,
+    ConvexHull   = 3,  // R2.0a
+    TriangleMesh = 4,  // R2.0a
+    Heightfield  = 5,  // R2.0a
+};
+
+// R2.0a: cooking inputs for advanced collider shapes.
+// Held by std::shared_ptr<const ColliderShapeData> on ColliderDesc so that
+// (a) copy through PhysicsCreatePool is O(1) refcount,
+// (b) multiple colliders can share one cooked payload,
+// (c) the payload is immutable at the physics layer.
+// Backends reject malformed payloads (see JoltBackend3D makeShape).
+struct ColliderShapeData {
+    std::vector<ayt::math::FVector3> hullPoints;       // ConvexHull only; size <= 256
+    std::vector<ayt::math::FVector3> meshVertices;     // TriangleMesh only
+    std::vector<uint32_t>            meshIndices;      // TriangleMesh only; size % 3 == 0; CCW order
+    std::vector<float>               heightSamples;    // Heightfield only; row-major N*N
+    uint32_t                         heightGridN = 0;  // Heightfield only; N >= 4
 };
 
 struct ColliderDesc {
@@ -102,6 +117,10 @@ struct ColliderDesc {
     float          height = 1.0f;                          // Capsule
     PhysMaterial   material{};
     bool           isTrigger = false;
+    // R2.0a: required for ConvexHull / TriangleMesh / Heightfield; null otherwise.
+    // Conversion to backend-native types (JPH::Vec3 / JPH::Float3 / raw float*)
+    // happens inside the backend TU — never leaks Jolt types into this header.
+    std::shared_ptr<const ColliderShapeData> shapeData;
 };
 
 enum class JointType : uint8_t {

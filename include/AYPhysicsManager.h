@@ -42,8 +42,10 @@ public:
 
     // Internal — accessed by World impls (friend below).
     PhysicsCommandQueue* commandQueue() { return _queue.get(); }
+    PhysicsCommandQueue* commandQueue2D() { return _queue2D.get(); }
     PhysicsCreatePool*   createPool()   { return _createPool.get(); }
     SyncQueryMailbox*    syncMailbox()  { return _syncMailbox.get(); }
+    SyncQueryMailbox*    syncMailbox2D() { return _syncMailbox2D.get(); }
     IPhysicsBackend3D*   backend3D()    { return _backend3D.get(); }
     IPhysicsBackend2D*   backend2D()    { return _backend2D.get(); }
     const PhysicsBackendDescriptor& descriptor() const { return _descriptor; }
@@ -62,8 +64,10 @@ private:
     std::unique_ptr<IPhysicsBackend3D> _backend3D;
     std::unique_ptr<IPhysicsBackend2D> _backend2D;
     std::unique_ptr<PhysicsCommandQueue> _queue;
+    std::unique_ptr<PhysicsCommandQueue> _queue2D;
     std::unique_ptr<PhysicsCreatePool> _createPool;
     std::unique_ptr<SyncQueryMailbox> _syncMailbox;
+    std::unique_ptr<SyncQueryMailbox> _syncMailbox2D;
     std::thread _physicsThread;
 
     // Double-buffered snapshots (front index atomically swapped).

@@ -140,6 +140,68 @@ if(AYPHYSICS_BUILD_JOLT)
 endif()
 
 # =============================================================================
+# Box2D integration (R2.5 real 2D impl)
+# =============================================================================
+option(AYPHYSICS_BUILD_BOX2D "Build Box2DBackend2D (requires vcpkg box2d port)" OFF)
+
+if(NOT AYPHYSICS_BUILD_BOX2D)
+    set(_ayphys_box2d_probe_paths
+        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
+        "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include"
+    )
+    foreach(_p IN LISTS _ayphys_box2d_probe_paths)
+        if(EXISTS "${_p}/box2d/box2d.h")
+            set(AYPHYSICS_BUILD_BOX2D ON CACHE BOOL "Build Box2DBackend2D (requires vcpkg box2d port)" FORCE)
+            message(STATUS "AYPhysics: auto-enabled Box2D backend (vcpkg Box2D detected at ${_p})")
+            break()
+        endif()
+    endforeach()
+endif()
+
+set(_ayphys_box2d_found FALSE)
+
+if(AYPHYSICS_BUILD_BOX2D)
+    find_package(box2d CONFIG QUIET)
+    if(box2d_FOUND)
+        set(_ayphys_box2d_found TRUE)
+        set(AYPHYSICS_BOX2D_TARGET "box2d::box2d")
+        message(STATUS "AYPhysics: Box2D backend ENABLED via find_package(box2d)")
+    else()
+        find_path(_ayphys_box2d_header "box2d/box2d.h")
+        if(NOT _ayphys_box2d_header)
+            if(DEFINED ENV{VCPKG_ROOT})
+                set(_ayphys_box2d_inc "$ENV{VCPKG_ROOT}/installed/x64-windows/include")
+                if(EXISTS "${_ayphys_box2d_inc}/box2d/box2d.h")
+                    set(_ayphys_box2d_header "${_ayphys_box2d_inc}")
+                endif()
+            elseif(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include/box2d/box2d.h")
+                set(_ayphys_box2d_header "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include")
+            endif()
+        endif()
+        if(_ayphys_box2d_header)
+            find_library(BOX2D_LIB NAMES box2d)
+            if(BOX2D_LIB)
+                set(_ayphys_box2d_found TRUE)
+                set(AYPHYSICS_BOX2D_TARGET "${BOX2D_LIB}")
+                set(AYPHYSICS_BOX2D_INCLUDE_DIR "${_ayphys_box2d_header}")
+                message(STATUS "AYPhysics: Box2D backend ENABLED via find_path fallback (${BOX2D_LIB})")
+            else()
+                message(WARNING "AYPhysics: box2d/box2d.h found but box2d.lib missing - disabling Box2D backend")
+            endif()
+        endif()
+    endif()
+
+    if(_ayphys_box2d_found)
+        list(APPEND BACKEND_FILES     backend/Box2DBackend2D.cpp)
+        list(APPEND BACKEND_HEADERS   backend/Box2DBackend2D.h)
+    else()
+        message(WARNING "AYPhysics: Box2D not found; building without Box2D backend")
+        set(AYPHYSICS_BUILD_BOX2D OFF)
+        set(AYPHYSICS_NO_BOX2D TRUE)
+    endif()
+endif()
+
+# =============================================================================
 # Library
 # =============================================================================
 
@@ -177,6 +239,16 @@ else()
     # always builds the TU behind AYPHYSICS_BUILD_JOLT (excluded by the BACKEND
     # list above), so this define is unused in the stub.
     target_compile_definitions(${MODULE_NAME} PRIVATE AYPHYSICS_NO_JOLT=1)
+endif()
+
+if(AYPHYSICS_BUILD_BOX2D)
+    target_link_libraries(${MODULE_NAME} PRIVATE ${AYPHYSICS_BOX2D_TARGET})
+    if(AYPHYSICS_BOX2D_INCLUDE_DIR)
+        target_include_directories(${MODULE_NAME} PRIVATE ${AYPHYSICS_BOX2D_INCLUDE_DIR})
+    endif()
+    target_compile_definitions(${MODULE_NAME} PRIVATE AYPHYSICS_HAS_BOX2D=1)
+else()
+    target_compile_definitions(${MODULE_NAME} PRIVATE AYPHYSICS_NO_BOX2D=1)
 endif()
 
 target_compile_features(${MODULE_NAME} PRIVATE cxx_std_20)

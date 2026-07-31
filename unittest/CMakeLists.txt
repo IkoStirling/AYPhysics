@@ -18,6 +18,12 @@ add_executable(${TEST_TARGET}
     # present (the file is empty otherwise — it relies on Test_JoltBackend3D_Stub
     # for the no-Jolt regression path).
     Test_JoltBackend3D.cpp
+    # R2.0a: advanced collider shapes (ConvexHull / TriangleMesh / Heightfield).
+    # 10 Jolt-gated cases + 1 Mock-only case (round-trip shared_ptr). Always
+    # compiled; Mock case runs in Null mode (proves shared_ptr survives
+    # create-pool without Jolt linkage).
+    Test_JoltBackend3D_AdvancedShapes.cpp
+    Test_Box2DBackend2D.cpp
     # MockBackend3D.cpp provides the testaccess:: namespace symbols; the static
     # lib drops them when no consumer in the lib references them, so we add the
     # TU to the test target directly.
@@ -52,6 +58,12 @@ if(AYPHYSICS_BUILD_JOLT)
     target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_HAS_JOLT=1)
 else()
     target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_NO_JOLT=1)
+endif()
+
+if(AYPHYSICS_BUILD_BOX2D)
+    target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_HAS_BOX2D=1)
+else()
+    target_compile_definitions(${TEST_TARGET} PRIVATE AYPHYSICS_NO_BOX2D=1)
 endif()
 
 if(MSVC)
