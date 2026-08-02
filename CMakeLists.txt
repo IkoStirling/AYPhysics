@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.12)
-project(AYPhysics)
+project(AYPhysics
+    VERSION 0.4.0
+    DESCRIPTION "AYPhysics — Jolt 3D + Box2D 2D + Box2DBridge 2D physics layer"
+)
 
 set(MODULE_NAME AYPhysics)
 
@@ -266,3 +269,5 @@ endif()
 
 enable_testing()
 add_subdirectory(unittest)
+
+message(STATUS "AYPhysics v0.4.0 (Jolt 3D + Box2D 2D + R1.5c Bench_PhysicsStep §17.8 gate) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

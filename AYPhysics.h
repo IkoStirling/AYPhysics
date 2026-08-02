@@ -1,5 +1,5 @@
 #pragma once
-// AYPhysics.h - umbrella include for AYPhysics
+// AYPhysics.h v0.4.0 - umbrella include for AYPhysics (Jolt 3D + Box2D 2D + Box2DBridge 2D)
 
 #include "AYPhysicsTypes.h"
 #include "AYPhysicsHandles.h"
