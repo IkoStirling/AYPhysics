@@ -23,6 +23,11 @@ public:
     PhysResult    applyForce(BodyHandle h, const ayt::math::FVector3& f);
     PhysResult    applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse, const ayt::math::FVector3& point);
 
+    // R9: runtime toggle of a body's collide mask (symmetric with PhysicsWorld2D).
+    // Replaces RigidbodyDesc::collideMask for the body's CollisionGroup SubGroupID;
+    // LayerMaskGroupFilter then re-evaluates contacts on the next step.
+    PhysResult    setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask);
+
     PhysResult    createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult    destroyCollider(ColliderHandle h);
 

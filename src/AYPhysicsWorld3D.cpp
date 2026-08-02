@@ -127,6 +127,18 @@ PhysResult PhysicsWorld3D::applyImpulse(BodyHandle h, const ayt::math::FVector3&
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld3D::setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type      = PhysicsCommandType::SetRigidbodyCollideMask;
+    cmd.body      = h;
+    cmd.layerMask = newMask;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
 // =========================================================================
 // Collider
 // =========================================================================

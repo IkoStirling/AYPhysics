@@ -469,6 +469,116 @@ TEST_SUITE(JoltBackend3DTests)
         waitForDrain(*mgr, 100);
         mgr->shutdown();
     }
+
+    // ------------------------------------------------------------
+    // R9: setRigidbodyCollideMask (Jolt GroupFilter symmetry with Box2D)
+    // ------------------------------------------------------------
+    TEST_CASE(Real_SetRigidbodyCollideMaskDisablesCollision) {
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+
+        // Static floor on Static layer (0), mask=all.
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            rb.layer = static_cast<PhysLayer>(PhysDefaultLayer::Static);
+            rb.collideMask = 0xFFFFFFFFu;
+            rb.position = ayt::math::FVector3(0.0f, 0.0f, 0.0f);
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 10.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        // Dynamic body on Dynamic layer (1), mask includes Static → settles on floor.
+        BodyHandle ball = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.layer = static_cast<PhysLayer>(PhysDefaultLayer::Dynamic);
+            rb.collideMask = (1u << static_cast<uint32_t>(PhysDefaultLayer::Static)) |
+                             (1u << static_cast<uint32_t>(PhysDefaultLayer::Dynamic));
+            rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+            rb.alwaysSync = true;
+            rb.linearDamping = 0.0f;
+            w->createRigidbody(rb, ball);
+            ColliderDesc cd{};
+            cd.body = ball; cd.shape = ColliderShape::Sphere; cd.radius = 0.5f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        float y = 5.0f;
+        for (int poll = 0; poll < 40; ++poll) {
+            for (int i = 0; i < 15; ++i) mgr->step(1.0f / 60.0f);
+            waitForDrain(*mgr, 30);
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == ball) y = bt.position.y;
+            if (y > 0.8f && y < 1.6f) break;  // rest y ~ 1.0 (floor top 0.5 + r 0.5)
+        }
+        CHECK(y > 0.8f);
+        CHECK(y < 1.6f);
+
+        // Clear collide mask → no longer hits Static layer → falls through.
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setRigidbodyCollideMask(ball, 0u)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        for (int poll = 0; poll < 40; ++poll) {
+            for (int i = 0; i < 15; ++i) mgr->step(1.0f / 60.0f);
+            waitForDrain(*mgr, 30);
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == ball) y = bt.position.y;
+            if (y < 0.0f) break;
+        }
+        CHECK(y < 0.0f);  // fell through the floor
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_CollideMaskZeroAtCreationIgnoresFloor) {
+        // Creation-time collideMask=0 must actually filter (R9 GroupFilter),
+        // not be a no-op like the old null-filter encoding.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            rb.layer = static_cast<PhysLayer>(PhysDefaultLayer::Static);
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 10.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        BodyHandle ball = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.layer = static_cast<PhysLayer>(PhysDefaultLayer::Dynamic);
+            rb.collideMask = 0u;  // collide with nothing
+            rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+            rb.alwaysSync = true;
+            w->createRigidbody(rb, ball);
+            ColliderDesc cd{};
+            cd.body = ball; cd.shape = ColliderShape::Sphere; cd.radius = 0.5f;
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+
+        float y = 5.0f;
+        for (int poll = 0; poll < 40; ++poll) {
+            for (int i = 0; i < 15; ++i) mgr->step(1.0f / 60.0f);
+            waitForDrain(*mgr, 30);
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == ball) y = bt.position.y;
+            if (y < 0.0f) break;
+        }
+        CHECK(y < 0.0f);  // fell through — mask=0 ignored the floor
+        mgr->shutdown();
+    }
 #endif
 
 TEST_SUITE_END

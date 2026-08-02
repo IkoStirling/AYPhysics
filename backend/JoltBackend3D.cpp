@@ -29,6 +29,7 @@
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h> // R2.0a
 #include <Jolt/Math/Float3.h>                              // R2.0a (MeshShape VertexList = Array<Float3>)
 #include <Jolt/Physics/Collision/CollisionGroup.h>
+#include <Jolt/Physics/Collision/GroupFilter.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/CollisionCollector.h>
 #include <Jolt/Physics/Collision/CastResult.h>
@@ -104,6 +105,26 @@ struct ObjVsBPLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilterTable
     ObjVsBPLayerFilter(const BPLayerInterface& bpIface, const ObjLayerPairFilter& pairFilter)
         : JPH::ObjectVsBroadPhaseLayerFilterTable(
             bpIface, BP_NUM_LAYERS, pairFilter, kMaxObjectLayers) {}
+};
+
+// R9: Box2D-style bidirectional layer/mask filter for CollisionGroup.
+// Encoding (mirrors PhysicsWorld2D / b2Filter):
+//   GroupID    = PhysLayer     (category / "who I am")
+//   SubGroupID = PhysLayerMask (collide mask / "who I hit")
+// Two bodies collide iff each mask includes the other's layer bit.
+class LayerMaskGroupFilter final : public JPH::GroupFilter {
+public:
+    bool CanCollide(const JPH::CollisionGroup& a,
+                    const JPH::CollisionGroup& b) const override {
+        const uint32_t layerA = a.GetGroupID();
+        const uint32_t layerB = b.GetGroupID();
+        if (layerA >= 32u || layerB >= 32u) return false;
+        const uint32_t maskA = a.GetSubGroupID();
+        const uint32_t maskB = b.GetSubGroupID();
+        const bool aWantsB = (maskA & (1u << layerB)) != 0u;
+        const bool bWantsA = (maskB & (1u << layerA)) != 0u;
+        return aWantsB && bWantsA;
+    }
 };
 
 // ContactListener: emits enter/stay/exit events into the backend's queue.
@@ -330,6 +351,9 @@ struct JoltBackend3D::Impl {
     std::unique_ptr<BPLayerInterface>             bpLayerInterface;
     std::unique_ptr<ObjLayerPairFilter>           objLayerPairFilter;
     std::unique_ptr<ObjVsBPLayerFilter>           objVsBpFilter;
+    // R9: shared GroupFilter for all bodies (Ref keeps it alive while any
+    // CollisionGroup still points at it).
+    JPH::Ref<LayerMaskGroupFilter>                layerMaskGroupFilter;
     std::unique_ptr<JPH::PhysicsSystem>           physicsSystem;
     std::unique_ptr<JoltContactListener>          contactListener;
     JPH::BodyManager*                             bodyManager = nullptr;
@@ -337,6 +361,8 @@ struct JoltBackend3D::Impl {
     // Handle tables (sized at init3D; never resized).
     std::vector<JPH::BodyID>      bodyIdByIndex;
     std::vector<uint16_t>         bodyGeneration;
+    std::vector<PhysLayer>        bodyLayer;        // R9: category for GroupID
+    std::vector<PhysLayerMask>    bodyCollideMask;  // R9: mask for SubGroupID
     std::vector<uint16_t>         colliderGeneration;
     std::vector<uint16_t>         jointGeneration;
     std::vector<JPH::BodyID>      jointBodyA;
@@ -399,6 +425,7 @@ struct JoltBackend3D::Impl {
         bpLayerInterface   = std::make_unique<BPLayerInterface>();
         objLayerPairFilter = std::make_unique<ObjLayerPairFilter>();
         objVsBpFilter      = std::make_unique<ObjVsBPLayerFilter>(*bpLayerInterface, *objLayerPairFilter);
+        layerMaskGroupFilter = new LayerMaskGroupFilter();
     }
 
     ~Impl() {
@@ -476,6 +503,8 @@ bool JoltBackend3D::init3D(const PhysicsBackendDescriptor& desc) {
 
     _impl->bodyIdByIndex.assign(maxBodies, JPH::BodyID());
     _impl->bodyGeneration.assign(maxBodies, 0u);
+    _impl->bodyLayer.assign(maxBodies, 0u);
+    _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
     _impl->colliderGeneration.assign(maxBodies, 0u);
     _impl->jointGeneration.assign(maxBodies, 0u);
     _impl->jointBodyA.assign(maxBodies, JPH::BodyID());
@@ -658,7 +687,13 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             JPH::Quat(d.rotation.x, d.rotation.y, d.rotation.z, d.rotation.w),
             toMotionType(d.type),
             toObjectLayer(d.layer));
-        bcs.mCollisionGroup  = JPH::CollisionGroup(nullptr, d.collideMask, 0);
+        // R9: GroupID=layer, SubGroupID=collideMask, filtered by LayerMaskGroupFilter
+        // (Box2D-style bidirectional mask). Previously stored mask as GroupID with
+        // a null filter, so collideMask was never actually applied.
+        bcs.mCollisionGroup = JPH::CollisionGroup(
+            _impl->layerMaskGroupFilter.GetPtr(),
+            static_cast<JPH::CollisionGroup::GroupID>(d.layer),
+            static_cast<JPH::CollisionGroup::SubGroupID>(d.collideMask));
         bcs.mLinearVelocity  = JPH::Vec3(d.linearVelocity.x,  d.linearVelocity.y,  d.linearVelocity.z);
         bcs.mAngularVelocity = JPH::Vec3(d.angularVelocity.x, d.angularVelocity.y, d.angularVelocity.z);
         bcs.mFriction        = d.material.friction;
@@ -692,6 +727,8 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         bi.SetUserData(id, static_cast<uint64_t>(cmd.body));
         _impl->bodyIdByIndex[idx] = id;
         _impl->bodyGeneration[idx] = static_cast<uint16_t>(handleGeneration(cmd.body));
+        _impl->bodyLayer[idx]       = d.layer;
+        _impl->bodyCollideMask[idx] = d.collideMask;
         if (d.alwaysSync) _impl->alwaysSyncSet.push_back(idx);
         return;
     }
@@ -707,6 +744,8 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         }
         _impl->bodyGeneration[idx] = 0u;
         _impl->bodyIdByIndex[idx]  = JPH::BodyID();
+        _impl->bodyLayer[idx]       = 0u;
+        _impl->bodyCollideMask[idx] = 0xFFFFFFFFu;
         auto it = std::find(_impl->alwaysSyncSet.begin(), _impl->alwaysSyncSet.end(), idx);
         if (it != _impl->alwaysSyncSet.end()) _impl->alwaysSyncSet.erase(it);
         return;
@@ -942,6 +981,32 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         JPH::BodyIDVector all;
         _impl->physicsSystem->GetBodies(all);
         for (JPH::BodyID id : all) bi.DeactivateBody(id);
+        return;
+    }
+
+    case CT::SetRigidbodyCollideMask: {
+        // R9: runtime collide-mask toggle (symmetric with PhysicsWorld2D / Box2D).
+        // Updates SubGroupID on the body's CollisionGroup so LayerMaskGroupFilter
+        // picks up the new mask on the next contact validation.
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        _impl->bodyCollideMask[idx] = cmd.layerMask;
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const PhysLayer layer = _impl->bodyLayer[idx];
+        const bool ok = withBody(bli, id, [&](JPH::Body& body) {
+            JPH::CollisionGroup g = body.GetCollisionGroup();
+            g.SetGroupFilter(_impl->layerMaskGroupFilter.GetPtr());
+            g.SetGroupID(static_cast<JPH::CollisionGroup::GroupID>(layer));
+            g.SetSubGroupID(static_cast<JPH::CollisionGroup::SubGroupID>(cmd.layerMask));
+            body.SetCollisionGroup(g);
+        });
+        if (!ok) { ++_notFoundCount; return; }
+        bi.ActivateBody(id);
         return;
     }
 
