@@ -7,41 +7,10 @@
 #endif
 
 #include "AYTest.h"
-
-#include "aytime/Clock.h"
-#include "ayplatform/Thread.h"
+#include "Test_JoltBackend3D_Helpers.h"
 
 using namespace ayt::physics;
-
-namespace {
-
-// Spin briefly so the physics thread drains enqueued commands / publishes the
-// next snapshot. Mirrors Test_MockBackend3D.cpp helpers.
-void waitForDrain(PhysicsManager& m, int ms) {
-    const uint64_t startUs = ayt::time::Clock::performanceNowUs();
-    while (ayt::time::Clock::performanceNowUs() - startUs <
-           static_cast<uint64_t>(ms) * 1000u) {
-        (void)m.fetchResults();
-        ayt::platform::Thread::sleep(0.001f);
-    }
-}
-
-#if defined(AYPHYSICS_HAS_JOLT)
-// Convenience: create a manager wired to JoltBackend3D with sane defaults.
-std::unique_ptr<PhysicsManager> makeJoltMgr(uint32_t maxBodies = 256u) {
-    PhysicsBackendDescriptor desc;
-    desc.kind3D                 = BackendKind::DefaultJolt;
-    desc.commandQueueCapacity   = 1024;
-    desc.createPoolCapacity     = 256;
-    desc.maxBodies              = maxBodies;
-    desc.maxBodyPairs           = maxBodies * 4u;
-    desc.maxContactConstraints  = maxBodies * 4u;
-    desc.gravity3D              = ayt::math::FVector3(0.0f, -9.81f, 0.0f);
-    return PhysicsManager::create(desc);
-}
-#endif
-
-}  // namespace
+using namespace ayt::physics::test_helpers;
 
 TEST_SUITE(JoltBackend3DTests)
 
@@ -227,25 +196,11 @@ TEST_SUITE(JoltBackend3DTests)
         mgr->shutdown();
     }
 
-    TEST_CASE(Real_ColliderShapeUnsupportedReturnsNoOp) {
-        auto mgr = makeJoltMgr();
-        PhysicsWorld3D* w = mgr->world3D();
-
-        BodyHandle bodyH = InvalidBodyHandle;
-        RigidbodyDesc rb;
-        rb.type = BodyType::Dynamic;
-        rb.position = ayt::math::FVector3(0.0f, 10.0f, 0.0f);
-        w->createRigidbody(rb, bodyH);
-
-        ColliderHandle colH = InvalidColliderHandle;
-        ColliderDesc cd{};
-        cd.body = bodyH;
-        cd.shape = ColliderShape::ConvexHull;  // unsupported in R1.5b
-        const PhysResult cr = w->createCollider(cd, colH);
-        CHECK_INT_EQ(static_cast<uint32_t>(cr), static_cast<uint32_t>(PhysResult::Ok));
-        (void)colH;
-        mgr->shutdown();
-    }
+    // R2.0a: Real_ColliderShapeUnsupportedReturnsNoOp REMOVED — it used
+    // ColliderShape::ConvexHull as the "unsupported sentinel", but ConvexHull
+    // becomes supported in R2.0a. The test would pass on what it should fail
+    // on (silent false-positive). Reintroduce a Spring/Slider/Point/Cone
+    // joint-typing test in R2.0b when those joint types land.
 
     TEST_CASE(Real_RaycastSyncFindsBody) {
         auto mgr = makeJoltMgr();
@@ -540,6 +495,10 @@ PhysResult JoltBackend3D::execute_createRigidbodyForTest(const RigidbodyDesc& de
     }
     outHandle = makeHandle(idx, gen);
 
+    // R2.0a: capture _notFoundCount BEFORE execute so we can detect reject
+    // (MustBeStatic validation, missing body, etc.) and surface it.
+    const uint64_t before = notFoundCount();
+
     PhysicsCommand cmd{};
     cmd.type       = PhysicsCommandType::CreateRigidbody;
     cmd.body       = outHandle;
@@ -549,6 +508,11 @@ PhysResult JoltBackend3D::execute_createRigidbodyForTest(const RigidbodyDesc& de
     payload.kind      = PhysicsCreatePayload::Kind::Rigidbody;
     payload.rigidDesc = desc;
     execute(cmd, &payload);
+
+    if (notFoundCount() > before) {
+        outHandle = InvalidBodyHandle;
+        return PhysResult::BackendError;
+    }
     return PhysResult::Ok;
 }
 
@@ -556,6 +520,60 @@ PhysResult JoltBackend3D::execute_destroyRigidbodyForTest(BodyHandle h) {
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::DestroyRigidbody;
     cmd.body = h;
+    execute(cmd, nullptr);
+    return PhysResult::Ok;
+}
+
+// R2.0a: synchronous create-collider test seam. Mirrors
+// execute_createRigidbodyForTest; uses notFoundCount() delta to surface
+// backend reject decisions (Mesh/Heightfield MustBeStatic, empty hull,
+// >256 points, N<4, null shapeData, etc.).
+PhysResult JoltBackend3D::execute_createColliderForTest(const ColliderDesc& desc,
+                                                        ColliderHandle& outHandle) {
+    outHandle = InvalidColliderHandle;
+    static std::atomic<uint32_t> g_nextColliderIndex{0};
+    static std::atomic<uint32_t> g_nextColliderGen{0};
+    const uint32_t idx = g_nextColliderIndex.fetch_add(1u) + 1u;
+    const uint32_t gen = g_nextColliderGen.fetch_add(1u) + 1u;
+    if (gen > kPhysHandleMaxGen) {
+        g_nextColliderGen.store(0u);
+    }
+    outHandle = makeHandle(idx, gen);
+
+    const uint64_t before = notFoundCount();
+
+    // CreateCollider command needs a body target. Mint a temporary handle
+    // if desc.body is invalid (test seam is forgiving on this).
+    ColliderDesc d = desc;
+    if (d.body == InvalidBodyHandle) {
+        static std::atomic<uint32_t> g_sentinelIndex{0};
+        static std::atomic<uint32_t> g_sentinelGen{0};
+        const uint32_t sidx = g_sentinelIndex.fetch_add(1u) + 1u;
+        const uint32_t sgen = g_sentinelGen.fetch_add(1u) + 1u;
+        d.body = makeHandle(sidx, sgen);
+    }
+
+    PhysicsCommand cmd{};
+    cmd.type       = PhysicsCommandType::CreateCollider;
+    cmd.collider   = outHandle;
+    cmd.createSlot = 0;
+
+    PhysicsCreatePayload payload{};
+    payload.kind         = PhysicsCreatePayload::Kind::Collider;
+    payload.colliderDesc = d;
+    execute(cmd, &payload);
+
+    if (notFoundCount() > before) {
+        outHandle = InvalidColliderHandle;
+        return PhysResult::BackendError;
+    }
+    return PhysResult::Ok;
+}
+
+PhysResult JoltBackend3D::execute_destroyColliderForTest(ColliderHandle h) {
+    PhysicsCommand cmd{};
+    cmd.type     = PhysicsCommandType::DestroyCollider;
+    cmd.collider = h;
     execute(cmd, nullptr);
     return PhysResult::Ok;
 }

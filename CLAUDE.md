@@ -1,7 +1,7 @@
 # AYPhysics 项目 AI 工作注意事项
 
 > **注意**：AYPhysics 是独立子模块，遵循本文件定义的规则。AYTest 是独立测试框架库，位于 `AYTest/CLAUDE.md`。
-> **权威设计**：[`design.md`](design.md)（v0.3, 2026-07-30）。代码与 design.md 不一致时，design.md 优先。
+> **权威设计**：[`design.md`](design.md)（v0.5, 2026-07-31）。代码与 design.md 不一致时，design.md 优先。
 
 ## 重要规则
 
@@ -171,7 +171,7 @@ cmake -B build -DAVPHYSICS_BUILD=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/b
 
 ### 新增 collider shape
 1. 在 `include/AYPhysicsTypes.h` 的 `enum class ColliderShape` 加值
-2. 在 `RigidbodyDesc` / `ColliderDesc` 加对应字段
+2. 在 `RigidbodyDesc` / `ColliderDesc` 加对应字段（**R2.0a+**：大块 shape 数据如 hull 点云 / mesh 三角形 / heightfield 采样数组必须通过 `std::shared_ptr<const ColliderShapeData>` 字段传入，避免 `PhysicsCreatePool` 深拷贝放大；详见 design.md §16.2）
 3. 在 `backend/<Xxx>Backend3D.cpp` 处理新 shape
 4. 在 `unittest/` 加测试
 
@@ -201,7 +201,7 @@ cmake -B build -DAVPHYSICS_BUILD=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/b
 
 ## 参考文档
 
-- [design.md](design.md) — **当前权威设计**（v0.2, 2026-07-20；§17 性能门禁）
+- [design.md](design.md) — **当前权威设计**（v0.5, 2026-07-31；§17 性能门禁 + R2.0a 高级 shape）
 - [ENGINE-DETERMINISM-ARCHITECTURE.md](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A/B 双路径
 - [AYEntity/design.md §14](../AYEntity/design.md) — SystemLane
 - [AYAudio/CMakeLists.txt](../AYAudio/CMakeLists.txt) — vcpkg 范本

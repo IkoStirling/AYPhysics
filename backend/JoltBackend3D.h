@@ -67,6 +67,13 @@ public:
     PhysResult execute_createRigidbodyForTest(const RigidbodyDesc& desc,
                                               BodyHandle& outHandle);
     PhysResult execute_destroyRigidbodyForTest(BodyHandle h);
+    // R2.0a: synchronous create-collider test seam. Bypasses manager queue;
+    // returns the backend's actual accept/reject decision synchronously (the
+    // Manager-level createCollider is async and cannot surface reject reasons
+    // — see test_helpers::createColliderSync in Test_JoltBackend3D_AdvancedShapes).
+    PhysResult execute_createColliderForTest(const ColliderDesc& desc,
+                                              ColliderHandle& outHandle);
+    PhysResult execute_destroyColliderForTest(ColliderHandle h);
 
 private:
     struct Impl;
