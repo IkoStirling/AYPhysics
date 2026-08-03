@@ -18,14 +18,28 @@ namespace ayt::physics {
 
 template <typename Handle>
 Handle PhysicsWorld3D::mintHandle(uint32_t& indexSlot, uint32_t& genSlot) noexcept {
-    // index = next free slot (0 reserved for "invalid handle"). Skip 0.
+    // F-A — cap by backend capacity. The backend slot arrays are sized to
+    // maxBodies; minting an index >= maxBodies would hand the caller a handle
+    // the backend's handle-validation gate (NotFound) immediately rejects —
+    // silently producing a phantom body. The descriptor's maxBodies is the
+    // authoritative bound. Index 0 is reserved (invalid handle) so legal
+    // indices live in [1, maxBodies).
+    const uint32_t maxBodies = _manager ? _manager->descriptor().maxBodies : 0u;
     const uint32_t nextIndex = indexSlot + 1u;
-    indexSlot = nextIndex;
+    if (nextIndex >= maxBodies) {
+        return InvalidBodyHandle;  // aliased to 0u for all Handle types
+    }
 
     // generation: bump on every mint so a reused slot is detectable by
     // backend handle validation (design §7.1 / §17.4). 0 is reserved.
     const uint32_t freshGen = bumpGeneration(genSlot);
-    genSlot = freshGen;
+
+    // Only commit the bump after both checks succeed. Rolling back means
+    // the next successful mint gets the SAME index with the NEXT generation,
+    // so no two mints ever share (idx, gen) — but we also don't skip a gen
+    // number on the failure path.
+    indexSlot = nextIndex;
+    genSlot   = freshGen;
 
     return makeHandle(nextIndex, freshGen);
 }
@@ -47,6 +61,7 @@ PhysResult PhysicsWorld3D::createRigidbody(const RigidbodyDesc& desc, BodyHandle
     if (!m || !m->createPool() || !m->commandQueue()) return PhysResult::InvalidState;
 
     outHandle = mintHandle<BodyHandle>(_nextBodyIndex, _nextBodyGen);
+    if (outHandle == InvalidBodyHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Rigidbody;
@@ -149,6 +164,7 @@ PhysResult PhysicsWorld3D::createCollider(const ColliderDesc& desc, ColliderHand
     if (!m) return PhysResult::InvalidState;
 
     outHandle = mintHandle<ColliderHandle>(_nextColliderIndex, _nextColliderGen);
+    if (outHandle == InvalidColliderHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Collider;
@@ -192,6 +208,7 @@ PhysResult PhysicsWorld3D::createJoint(const JointDesc& desc, JointHandle& outHa
     if (!m) return PhysResult::InvalidState;
 
     outHandle = mintHandle<JointHandle>(_nextJointIndex, _nextJointGen);
+    if (outHandle == InvalidJointHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Joint;

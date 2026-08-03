@@ -85,7 +85,14 @@ std::unique_ptr<PhysicsManager> PhysicsManager::create(const PhysicsBackendDescr
     }
     mgr->_backend2D = createBackend2D(desc.kind2D);
     if (!mgr->_backend2D) return nullptr;
-    if (!mgr->_backend2D->init2D(desc)) return nullptr;
+    if (!mgr->_backend2D->init2D(desc)) {
+        // F-K — 3D is live at this point; tear it down before bailing so the
+        // caller doesn't get a half-initialised manager leaking the 3D backend
+        // (and any Jolt PhysicsSystem / Box2D world owned by it).
+        mgr->_backend3D->stop();
+        mgr->_backend3D.reset();
+        return nullptr;
+    }
     mgr->_backend2D->setGravity(desc.gravity2D);
 
     // Mock pointer installed for test inspection.
@@ -113,13 +120,27 @@ std::unique_ptr<PhysicsManager> PhysicsManager::create(const PhysicsBackendDescr
     info.maxBodies = desc.maxBodies;
     info.maxColliders = desc.maxBodies * 2;
     info.maxJoints    = desc.maxBodies;
-    if (!mgr->_backend3D->start(info)) return nullptr;
+    if (!mgr->_backend3D->start(info)) {
+        // F-K — 2D was init'd above (b2World / Jolt system live); tear it down
+        // before returning so the caller doesn't get a half-initialised manager.
+        mgr->_backend2D->stop();
+        mgr->_backend2D.reset();
+        mgr->_backend3D.reset();
+        return nullptr;
+    }
 
     PhysicsBackendInfo info2D = mgr->_backend2D->describe();
     info2D.maxBodies = desc.maxBodies;
     info2D.maxColliders = desc.maxBodies * 2;
     info2D.maxJoints    = desc.maxBodies;
-    if (!mgr->_backend2D->start(info2D)) return nullptr;
+    if (!mgr->_backend2D->start(info2D)) {
+        // F-K — symmetric rollback: 3D was started above, must stop before we
+        // bail so the PhysicsSystem / Box2D world it owns is shut down cleanly.
+        mgr->_backend3D->stop();
+        mgr->_backend3D.reset();
+        mgr->_backend2D.reset();
+        return nullptr;
+    }
 
     // World3D + World2D get manager back-pointers (lifetime owned by manager).
     mgr->_world3D = std::unique_ptr<PhysicsWorld3D>(new PhysicsWorld3D());

@@ -3,6 +3,7 @@
 
 #include "aytime/Duration.h"
 
+#include <bit>                // std::countr_zero (C++20) for F-H/I bit iteration
 #include <cassert>
 #include <chrono>             // microsecond timeouts on std::condition_variable
                                // (interops via ayt::time::Duration::toChrono)
@@ -145,12 +146,16 @@ bool SyncQueryMailbox::initialize(uint32_t capacity) {
     if (capacity == 0) return false;
     _capacity = nextPow2(capacity);
     _mask     = _capacity - 1;
+    // F-H/I — pending-mask requires capacity <= 64 (one bit per slot).
+    // Callers (PhysicsManager) only pass kSyncQueryMailboxCapacity = 64; clamp
+    // anything larger to 64 rather than silently widening the mask to __int128.
+    if (_capacity > 64u) _capacity = 64u;
+    _mask     = _capacity - 1;
     _slots    = std::unique_ptr<PendingSlot[]>(new PendingSlot[_capacity]);
     _freeList.clear();
     _freeList.reserve(_capacity);
     for (uint32_t i = 0; i < _capacity; ++i) _freeList.push_back(i);
-    _writeIdx.store(0, std::memory_order_relaxed);
-    _readIdx.store(0,  std::memory_order_relaxed);
+    _pendingMask.store(0, std::memory_order_relaxed);
     if (!_cv) {
         auto* internal = new SyncQueryMailboxInternal{};
         _cv = internal;
@@ -167,8 +172,8 @@ void SyncQueryMailbox::shutdown() {
     _slots.reset();
     _freeList.clear();
     _capacity = 0;
-    _writeIdx.store(0, std::memory_order_relaxed);
-    _readIdx.store(0,  std::memory_order_relaxed);
+    _mask = 0;
+    _pendingMask.store(0, std::memory_order_relaxed);
 }
 
 bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
@@ -177,7 +182,9 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
     if (_capacity == 0) return false;
     auto* internal = static_cast<SyncQueryMailboxInternal*>(_cv);
 
-    // Allocate a slot.
+    // Allocate a slot AND mark it pending atomically. The mask bit is the
+    // single source of truth for "physics thread should service this slot";
+    // the free list is only consulted by the game thread for slot allocation.
     uint32_t slotIdx;
     {
         std::lock_guard<std::mutex> lk(internal->mu);
@@ -185,20 +192,11 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
         slotIdx = _freeList.back();
         _freeList.pop_back();
     }
-
     PendingSlot& slot = _slots[slotIdx];
     slot.request = request;
     slot.response = {};
     slot.ready.store(false, std::memory_order_release);
-
-    // Publish slot index to physics thread.
-    const uint64_t write = _writeIdx.fetch_add(1, std::memory_order_acq_rel);
-    // Store slot idx in mask bits of write index is not feasible — use a side-band
-    // queue? For R1, single-slot-in-flight is supported by serializing at the
-    // game side (PhysicsWorld3D::raycastSync acquires a per-world mutex). For the
-    // simple mailbox, we just bump the index and let physics iterate all slots
-    // checking ready==true. But we still need to know which slot index to wait
-    // on. We store the slotIdx in a private map keyed by an in-flight counter.
+    _pendingMask.fetch_or(uint64_t(1) << slotIdx, std::memory_order_release);
 
     // Wait for slot.ready to become true.
     //
@@ -214,36 +212,56 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
         internal->cv.wait_for(lk, timeout,
                               [&]() { return slot.ready.load(std::memory_order_acquire); });
     };
+    auto releaseSlot = [&]() {
+        // F-H/I — timed-out / error path. Clear the pending bit so serviceAll
+        // doesn't service a stale request once the response finally arrives,
+        // and push the slot back to the free list.
+        _pendingMask.fetch_and(~(uint64_t(1) << slotIdx), std::memory_order_release);
+        std::lock_guard<std::mutex> lk(internal->mu);
+        _freeList.push_back(slotIdx);
+    };
     if (timeoutMicroseconds < 0) {
         std::unique_lock<std::mutex> lk(internal->mu);
         internal->cv.wait(lk, [&]() { return slot.ready.load(std::memory_order_acquire); });
     } else if (timeoutMicroseconds == 0) {
-        if (!slot.ready.load(std::memory_order_acquire)) return false;
+        if (!slot.ready.load(std::memory_order_acquire)) {
+            releaseSlot();
+            return false;
+        }
     } else {
         waitUntil();
+        if (!slot.ready.load(std::memory_order_acquire)) {
+            releaseSlot();
+            return false;
+        }
     }
 
-    if (!slot.ready.load(std::memory_order_acquire)) return false;
     outResponse = slot.response;
+    // Release the slot back to the pool + clear the pending bit.
+    _pendingMask.fetch_and(~(uint64_t(1) << slotIdx), std::memory_order_release);
     {
         std::lock_guard<std::mutex> lk(internal->mu);
         _freeList.push_back(slotIdx);
     }
-    (void)write;
     return true;
 }
 
 void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
     if (!backend || _capacity == 0) return;
-    // Linear scan over slots; mark-ready ones get executed and response written.
-    // We rely on slot.request.requestId being set by game thread before submission.
-    for (uint32_t i = 0; i < _capacity; ++i) {
-        PendingSlot& slot = _slots[i];
-        // "Pending" = slot has been claimed (freeList doesn't include it) but not yet ready.
-        // The free-list membership is the simplest marker.
-        bool inFree = false;
-        for (uint32_t f : _freeList) { if (f == i) { inFree = true; break; } }
-        if (inFree) continue;
+    // F-H/I — iterate ONLY slots whose pending-mask bit is set. Old code did
+    // a linear scan over the freeList for every slot (O(N^2) for cap=64);
+    // popcount of the mask is O(popcount) and bit iteration is O(active).
+    uint64_t pending = _pendingMask.load(std::memory_order_acquire);
+    while (pending != 0) {
+        // C++20 std::countr_zero is portable across MSVC + GCC/Clang; non-zero
+        // invariant (we checked pending != 0 above) keeps the precondition safe.
+        const uint32_t slotIdx = static_cast<uint32_t>(std::countr_zero(pending));
+        pending &= pending - 1;  // clear lowest set bit
+
+        PendingSlot& slot = _slots[slotIdx];
+        // Defensive: if the slot already became ready (game thread reaped
+        // the response while we were running) the pending bit should have
+        // been cleared already. Skip — but DON'T clear the bit again.
         if (slot.ready.load(std::memory_order_acquire)) continue;
 
         SyncQueryResponse resp;
@@ -258,7 +276,6 @@ void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
             internal->cv.notify_all();
         }
     }
-    (void)_readIdx;
 }
 
 } // namespace ayt::physics

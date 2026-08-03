@@ -186,8 +186,12 @@ private:
 
     std::unique_ptr<PendingSlot[]> _slots;
     std::vector<uint32_t>    _freeList;     // pool indices
-    std::atomic<uint32_t>    _writeIdx{0};
-    std::atomic<uint32_t>    _readIdx{0};
+    // F-H/I — bit i = slot i is currently in flight (game thread claimed it
+    // from _freeList, hasn't received its response yet). Lets serviceAll skip
+    // the per-slot linear _freeList scan and run in O(popcount) instead of
+    // O(N^2). Capacity is capped at 64 (kSyncQueryMailboxCapacity), so a
+    // single uint64_t covers every slot.
+    std::atomic<uint64_t>    _pendingMask{0};
     uint32_t _capacity = 0;
     uint32_t _mask     = 0;
     // cv/mutex per slot via a single condvar + wake count.

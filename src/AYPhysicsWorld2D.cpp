@@ -6,10 +6,17 @@ namespace ayt::physics {
 
 template <typename Handle>
 Handle PhysicsWorld2D::mintHandle(uint32_t& indexSlot, uint32_t& genSlot) noexcept {
+    // F-A — mirror of PhysicsWorld3D::mintHandle. See the 3D version for the
+    // full rationale: capping by descriptor().maxBodies prevents minting a
+    // handle the backend's NotFound gate will silently reject.
+    const uint32_t maxBodies = _manager ? _manager->descriptor().maxBodies : 0u;
     const uint32_t nextIndex = indexSlot + 1u;
-    indexSlot = nextIndex;
+    if (nextIndex >= maxBodies) {
+        return InvalidBodyHandle;  // aliased to 0u for all Handle types
+    }
     const uint32_t freshGen = bumpGeneration(genSlot);
-    genSlot = freshGen;
+    indexSlot = nextIndex;
+    genSlot   = freshGen;
     return makeHandle(nextIndex, freshGen);
 }
 
@@ -25,6 +32,7 @@ PhysResult PhysicsWorld2D::createRigidbody(const RigidbodyDesc& desc, BodyHandle
     if (!m || !m->createPool() || !m->commandQueue2D()) return PhysResult::InvalidState;
 
     outHandle = mintHandle<BodyHandle>(_nextBodyIndex, _nextBodyGen);
+    if (outHandle == InvalidBodyHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Rigidbody;
@@ -140,6 +148,7 @@ PhysResult PhysicsWorld2D::createCollider(const ColliderDesc& desc, ColliderHand
     if (!m) return PhysResult::InvalidState;
 
     outHandle = mintHandle<ColliderHandle>(_nextColliderIndex, _nextColliderGen);
+    if (outHandle == InvalidColliderHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Collider;
@@ -179,6 +188,7 @@ PhysResult PhysicsWorld2D::createJoint(const JointDesc& desc, JointHandle& outHa
     if (!m) return PhysResult::InvalidState;
 
     outHandle = mintHandle<JointHandle>(_nextJointIndex, _nextJointGen);
+    if (outHandle == InvalidJointHandle) return PhysResult::OutOfRange;
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Joint;
