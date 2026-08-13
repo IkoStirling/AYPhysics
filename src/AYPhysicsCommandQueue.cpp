@@ -80,6 +80,7 @@ uint32_t PhysicsCommandQueue::approximateDepth() const noexcept {
 
 bool PhysicsCreatePool::initialize(uint32_t capacity) {
     if (capacity == 0) return false;
+    std::lock_guard<std::mutex> lock(_mutex);
     _capacity = capacity;
     _slots = std::unique_ptr<Slot[]>(new Slot[capacity]);
     _freeList.clear();
@@ -87,26 +88,27 @@ bool PhysicsCreatePool::initialize(uint32_t capacity) {
     for (uint32_t i = 0; i < capacity; ++i) {
         _freeList.push_back(i);
     }
-    _inFlight.store(0, std::memory_order_relaxed);
+    _inFlight = 0;
     return true;
 }
 
 void PhysicsCreatePool::shutdown() {
+    std::lock_guard<std::mutex> lock(_mutex);
     _slots.reset();
     _freeList.clear();
     _capacity = 0;
-    _inFlight.store(0, std::memory_order_relaxed);
+    _inFlight = 0;
 }
 
 CreateSlotId PhysicsCreatePool::allocate(const PhysicsCreatePayload& payload) {
+    std::lock_guard<std::mutex> lock(_mutex);
     if (_freeList.empty()) return InvalidCreateSlotId;
-    // Single-producer (game thread) use; no CAS needed.
     const uint32_t idx = _freeList.back();
     _freeList.pop_back();
     Slot& slot = _slots[idx];
     slot.payload = payload;
-    slot.busy.store(true, std::memory_order_release);
-    _inFlight.fetch_add(1, std::memory_order_relaxed);
+    slot.busy = true;
+    ++_inFlight;
     // Slot id is (idx + 1) so 0 stays reserved for invalid.
     return idx + 1;
 }
@@ -114,17 +116,20 @@ CreateSlotId PhysicsCreatePool::allocate(const PhysicsCreatePayload& payload) {
 bool PhysicsCreatePool::take(CreateSlotId slotId, PhysicsCreatePayload& out) {
     if (slotId == InvalidCreateSlotId || slotId > _capacity) return false;
     const uint32_t idx = slotId - 1;
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (idx >= _capacity) return false;
     Slot& slot = _slots[idx];
-    if (!slot.busy.load(std::memory_order_acquire)) return false;
+    if (!slot.busy) return false;
     out = slot.payload;
-    slot.busy.store(false, std::memory_order_release);
+    slot.busy = false;
     _freeList.push_back(idx);
-    _inFlight.fetch_sub(1, std::memory_order_relaxed);
+    --_inFlight;
     return true;
 }
 
 uint32_t PhysicsCreatePool::inFlightCount() const noexcept {
-    return _inFlight.load(std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _inFlight;
 }
 
 // =============================================================================

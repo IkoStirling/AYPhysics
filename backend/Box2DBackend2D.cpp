@@ -103,7 +103,7 @@ struct Box2DBackend2D::Impl {
     uint32_t maxBodies = 0;
 };
 
-Box2DBackend2D::Box2DBackend2D()  = default;
+Box2DBackend2D::Box2DBackend2D() = default;
 Box2DBackend2D::~Box2DBackend2D() { stop(); }
 
 bool Box2DBackend2D::init2D(const PhysicsBackendDescriptor& desc) {
@@ -178,7 +178,16 @@ void Box2DBackend2D::step(float deltaTime) {
     b2World_Step(_impl->worldId, dt, _maxSubSteps);
 
     // A1+A2: drain contact + sensor events into the collision event queue.
-    // Box2D event arrays are transient — only valid until the next step.
+    // Box2D event arrays are transient — only valid until the next step, and
+    // may reference shapes destroyed since the last step (async destroy +
+    // pending step in the same worker iteration). Validate before deref —
+    // box2d's own sample pattern (b2Shape_IsValid precedes b2Shape_GetBody);
+    // an invalid id yields InvalidBodyHandle and drops the event.
+    auto bodyOf = [this](b2ShapeId sid) -> BodyHandle {
+        if (!b2Shape_IsValid(sid)) return InvalidBodyHandle;
+        return resolveBodyHandle(b2Shape_GetBody(sid),
+            _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
+    };
     {
         b2ContactEvents ce = b2World_GetContactEvents(_impl->worldId);
         std::lock_guard<std::mutex> lk(_impl->collisionEventMu);
@@ -186,10 +195,8 @@ void Box2DBackend2D::step(float deltaTime) {
             const b2ContactBeginTouchEvent& e = ce.beginEvents[i];
             CollisionEvent ev{};
             ev.kind  = 0;  // enter
-            ev.bodyA  = resolveBodyHandle(b2Shape_GetBody(e.shapeIdA),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
-            ev.bodyB  = resolveBodyHandle(b2Shape_GetBody(e.shapeIdB),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
+            ev.bodyA  = bodyOf(e.shapeIdA);
+            ev.bodyB  = bodyOf(e.shapeIdB);
             ev.normal = ayt::math::FVector3(
                 e.manifold.normal.x, e.manifold.normal.y, 0.0f);
             _impl->collisionEventQueue.push_back(ev);
@@ -199,10 +206,8 @@ void Box2DBackend2D::step(float deltaTime) {
             const b2ContactEndTouchEvent& e = ce.endEvents[i];
             CollisionEvent ev{};
             ev.kind  = 2;  // exit
-            ev.bodyA  = resolveBodyHandle(b2Shape_GetBody(e.shapeIdA),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
-            ev.bodyB  = resolveBodyHandle(b2Shape_GetBody(e.shapeIdB),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
+            ev.bodyA  = bodyOf(e.shapeIdA);
+            ev.bodyB  = bodyOf(e.shapeIdB);
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -214,10 +219,8 @@ void Box2DBackend2D::step(float deltaTime) {
             const b2SensorBeginTouchEvent& e = se.beginEvents[i];
             CollisionEvent ev{};
             ev.kind  = 3;  // sensor enter
-            ev.bodyA  = resolveBodyHandle(b2Shape_GetBody(e.sensorShapeId),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
-            ev.bodyB  = resolveBodyHandle(b2Shape_GetBody(e.visitorShapeId),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
+            ev.bodyA  = bodyOf(e.sensorShapeId);
+            ev.bodyB  = bodyOf(e.visitorShapeId);
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -225,10 +228,8 @@ void Box2DBackend2D::step(float deltaTime) {
             const b2SensorEndTouchEvent& e = se.endEvents[i];
             CollisionEvent ev{};
             ev.kind  = 4;  // sensor exit
-            ev.bodyA  = resolveBodyHandle(b2Shape_GetBody(e.sensorShapeId),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
-            ev.bodyB  = resolveBodyHandle(b2Shape_GetBody(e.visitorShapeId),
-                _impl->bodyIdByIndex, _impl->bodyGeneration, _impl->maxBodies);
+            ev.bodyA  = bodyOf(e.sensorShapeId);
+            ev.bodyB  = bodyOf(e.visitorShapeId);
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -552,7 +553,10 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             }
             const b2Hull hull =
                 b2ComputeHull(pts.data(), static_cast<int>(pts.size()));
-            if (hull.count < 3) { ++_notFoundCount; return; }
+            if (hull.count < 3) {
+                ++_notFoundCount;
+                return;
+            }
             const b2Polygon poly = b2MakePolygon(&hull, 0.0f);
             shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &poly);
             break;
@@ -562,7 +566,10 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             return;
         }
 
-        if (!b2Shape_IsValid(shapeId)) { ++_notFoundCount; return; }
+        if (!b2Shape_IsValid(shapeId)) {
+            ++_notFoundCount;
+            return;
+        }
         _impl->shapeIdByIndex[idx]      = shapeId;
         _impl->colliderGeneration[idx]  = static_cast<uint16_t>(handleGeneration(cmd.collider));
         return;
@@ -880,8 +887,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         return;
     }
 
-    ++_notFoundCount;
-}
+    ++_notFoundCount;}
 
 void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
                                  SyncQueryResponse& outResponse) {

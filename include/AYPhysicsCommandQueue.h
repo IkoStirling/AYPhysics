@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace ayt::physics {
@@ -113,6 +114,11 @@ private:
 // Out-of-band create pool. Game allocates a slot, takes a CreateSlotId back,
 // pushes the slot id through the ring; physics thread takes + executes + frees.
 // Capacity is the upper bound on in-flight creates (mirrors descriptor setting).
+//
+// allocate() (game) and take() (physics) both mutate _freeList — they are NOT
+// single-owner. A mutex serializes freelist + slot busy/payload handoff; the
+// previous unsynchronized vector pop/push raced and could double-issue a slot
+// so the second take() saw busy=false and dropped the create payload.
 class PhysicsCreatePool {
 public:
     PhysicsCreatePool() = default;
@@ -132,7 +138,7 @@ public:
 
 private:
     struct Slot {
-        std::atomic<bool>    busy{false};
+        bool                 busy = false;
         PhysicsCreatePayload payload{};
         Slot() = default;
         Slot(const Slot&) = delete;
@@ -141,10 +147,11 @@ private:
         Slot& operator=(Slot&&) = delete;
     };
 
+    mutable std::mutex _mutex;
     std::unique_ptr<Slot[]> _slots;
-    std::vector<uint32_t> _freeList;     // indices; game thread pops, physics thread pushes
+    std::vector<uint32_t> _freeList;     // indices; guarded by _mutex
     uint32_t _capacity = 0;
-    std::atomic<uint32_t> _inFlight{0};
+    uint32_t _inFlight = 0;              // guarded by _mutex
 };
 
 // =============================================================================
