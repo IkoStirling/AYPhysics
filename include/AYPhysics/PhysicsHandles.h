@@ -1,5 +1,5 @@
 #pragma once
-// AYPhysicsHandles.h - packed index+generation handle helpers (§7.1)
+// AYPhysics/PhysicsHandles.h - packed index+generation handle helpers (§7.1)
 //
 // Layout (locked):
 //   bits [0..19]  = index      (1 .. 2^20-1); 0 reserved

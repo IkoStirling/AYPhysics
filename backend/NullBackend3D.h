@@ -7,7 +7,7 @@
 //
 // Always built; no third-party dependency.
 
-#include "IPhysicsBackend3D.h"
+#include "AYPhysics/IPhysicsBackend3D.h"
 
 namespace ayt::physics {
 

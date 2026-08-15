@@ -48,8 +48,8 @@
 ### 命名空间 / 类型
 - 命名空间：`ayt::physics`
 - 公开类名**不带** `AY` 前缀（`class PhysicsManager`、`class Rigidbody`、`class Cloth`）
-- 文件名带 `AY` 前缀（`AYPhysicsManager.h`、`AYPhysicsCloth.h`）
-- 接口文件用 `I` 前缀（`IPhysicsBackend.h`）
+- 文件名带 `AY` 前缀（`AYPhysics/PhysicsManager.h`、`AYPhysicsCloth.h`）
+- 接口文件用 `I` 前缀（`AYPhysics/IPhysicsBackend.h`）
 - 私有成员：`_` 前缀 camelCase（`_system`、`_bodies`）
 - 公共成员：camelCase（`gravity`、`mass`）
 - 句柄：`using BodyHandle = uint32_t`，**packed index(20)+generation(12)**，`Invalid*Handle = 0`（见 design §7.1）
@@ -78,8 +78,8 @@
 
 | 类型 | 命名 | 示例 |
 |---|---|---|
-| 公开头 | `AY` 前缀 | `AYPhysicsManager.h`、`AYPhysicsCommandQueue.h` |
-| 接口头 | `I` 前缀 | `IPhysicsBackend.h`、`IPhysicsBackend3D.h` |
+| 公开头 | `AY` 前缀 | `AYPhysics/PhysicsManager.h`、`AYPhysics/PhysicsCommandQueue.h` |
+| 接口头 | `I` 前缀 | `AYPhysics/IPhysicsBackend.h`、`AYPhysics/IPhysicsBackend3D.h` |
 | Backend 头 | `AY` 前缀 + 后缀 | `NullBackend3D.h`、`JoltBackend3D.h` |
 | 公开类 | **不带**前缀 | `class PhysicsManager`、`class Rigidbody` |
 | 公开接口类 | `I` 前缀 | `class IPhysicsBackend` |
@@ -98,18 +98,18 @@ AYPhysics/
 ├── CMakeLists.txt
 ├── AYPhysics.h                          # umbrella include
 ├── interface/
-│   ├── IPhysicsBackend.h
-│   ├── IPhysicsBackend3D.h
-│   ├── IPhysicsBackend2D.h              # R1 占位
-│   └── PhysicsScene.h
+│   ├── AYPhysics/IPhysicsBackend.h
+│   ├── AYPhysics/IPhysicsBackend3D.h
+│   ├── AYPhysics/IPhysicsBackend2D.h              # R1 占位
+│   └── AYPhysics/PhysicsScene.h
 ├── include/
-│   ├── AYPhysicsTypes.h                 # handles / PhysResult / descriptors
-│   ├── AYPhysicsManager.h
-│   ├── AYPhysicsWorld3D.h
-│   ├── AYPhysicsWorld2D.h               # R1 占位
-│   ├── AYPhysicsCommandQueue.h
-│   ├── AYPhysicsSubSystem.h
-│   ├── AYPhysicsBackendTestAccess.h     # 测试专用
+│   ├── AYPhysics/PhysicsTypes.h                 # handles / PhysResult / descriptors
+│   ├── AYPhysics/PhysicsManager.h
+│   ├── AYPhysics/PhysicsWorld3D.h
+│   ├── AYPhysics/PhysicsWorld2D.h               # R1 占位
+│   ├── AYPhysics/PhysicsCommandQueue.h
+│   ├── AYPhysics/PhysicsSubSystem.h
+│   ├── AYPhysics/PhysicsBackendTestAccess.h     # 测试专用
 │   ├── AYPhysicsCloth.h                 # R3+ 占位
 │   ├── AYPhysicsFluid.h                 # R3+ 占位
 │   └── AYPhysicsParticle.h              # R3+ 占位
@@ -170,13 +170,13 @@ cmake -B build -DAVPHYSICS_BUILD=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/b
 5. 在 `CONTROL_CAPABILITY_PLAN.md` 不适用——直接在 `design.md` §3 Phase roadmap 加 step
 
 ### 新增 collider shape
-1. 在 `include/AYPhysicsTypes.h` 的 `enum class ColliderShape` 加值
+1. 在 `include/AYPhysics/PhysicsTypes.h` 的 `enum class ColliderShape` 加值
 2. 在 `RigidbodyDesc` / `ColliderDesc` 加对应字段（**R2.0a+**：大块 shape 数据如 hull 点云 / mesh 三角形 / heightfield 采样数组必须通过 `std::shared_ptr<const ColliderShapeData>` 字段传入，避免 `PhysicsCreatePool` 深拷贝放大；详见 design.md §16.2）
 3. 在 `backend/<Xxx>Backend3D.cpp` 处理新 shape
 4. 在 `unittest/` 加测试
 
 ### 新增 joint type
-1. 在 `include/AYPhysicsTypes.h` 的 `enum class JointType` 加值
+1. 在 `include/AYPhysics/PhysicsTypes.h` 的 `enum class JointType` 加值
 2. 在 `JointDesc` 加类型特定参数
 3. 在 backend 实现
 4. 在 `unittest/` 加测试
@@ -206,4 +206,4 @@ cmake -B build -DAVPHYSICS_BUILD=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/b
 - [AYEntity/design.md §14](../AYEntity/design.md) — SystemLane
 - [AYAudio/CMakeLists.txt](../AYAudio/CMakeLists.txt) — vcpkg 范本
 - [AYAudio/design.md §4.4](../AYAudio/design.md) — SPSC 命令通道范本
-- [AYAudio/interface/IAudioBackend.h](../AYAudio/interface/IAudioBackend.h) — 后端抽象范本
+- [AYAudio/interface/AYAudio/IAudioBackend.h](../AYAudio/interface/AYAudio/IAudioBackend.h) — 后端抽象范本

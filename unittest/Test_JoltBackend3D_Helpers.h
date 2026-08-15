@@ -9,9 +9,9 @@
 // Gating: helpers are always available (no AYPHYSICS_HAS_JOLT guard) so the
 // Mock-only round-trip case can use them too.
 
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #include "AYTime/Clock.h"
 #include "AYPlatform/Thread.h"

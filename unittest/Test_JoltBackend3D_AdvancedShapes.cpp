@@ -15,10 +15,10 @@
 // backend reject reasons — R2.0a reject cases would silently pass on what
 // they should fail on. The seams use _notFoundCount delta to surface reject.
 
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsBackendTestAccess.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsBackendTestAccess.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #if defined(AYPHYSICS_HAS_JOLT)
 #include "JoltBackend3D.h"

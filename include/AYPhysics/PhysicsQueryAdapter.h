@@ -1,7 +1,7 @@
 #pragma once
-// AYPhysicsQueryAdapter.h — IPhysicsQuery over PhysicsManager::world3D()
+// AYPhysics/PhysicsQueryAdapter.h — IPhysicsQuery over PhysicsManager::world3D()
 
-#include "IPhysicsQuery.h"
+#include "AYPhysics/IPhysicsQuery.h"
 
 namespace ayt::physics
 {

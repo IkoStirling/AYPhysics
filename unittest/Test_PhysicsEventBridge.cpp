@@ -1,11 +1,11 @@
 // Test_PhysicsEventBridge.cpp — E-3: collision snapshot → EventBus
 
-#include "AYPhysicsEventBridge.h"
-#include "AYPhysicsHandles.h"
+#include "AYPhysics/PhysicsEventBridge.h"
+#include "AYPhysics/PhysicsHandles.h"
 #include "AYTest.h"
 
-#include <ayevent/EventBus.h>
-#include <ayevent/Events/PhysicsEvents.h>
+#include <AYEventSystem/EventBus.h>
+#include <AYEventSystem/Events/PhysicsEvents.h>
 
 #include <vector>
 

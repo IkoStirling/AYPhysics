@@ -1,5 +1,5 @@
-#include "AYPhysicsHandles.h"
-#include "PhysicsScene.h"
+#include "AYPhysics/PhysicsHandles.h"
+#include "AYPhysics/PhysicsScene.h"
 
 #include "AYTest.h"
 

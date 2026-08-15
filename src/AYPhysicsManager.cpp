@@ -1,15 +1,15 @@
-#include "AYPhysicsManager.h"
+#include "AYPhysics/PhysicsManager.h"
 
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsWorld2D.h"
-#include "IPhysicsBackend.h"
-#include "IPhysicsBackend3D.h"
-#include "IPhysicsBackend2D.h"
-#include "PhysicsScene.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsWorld2D.h"
+#include "AYPhysics/IPhysicsBackend.h"
+#include "AYPhysics/IPhysicsBackend3D.h"
+#include "AYPhysics/IPhysicsBackend2D.h"
+#include "AYPhysics/PhysicsScene.h"
 #include "NullBackend3D.h"
 #include "NullBackend2D.h"
 #include "MockBackend3D.h"
-#include "AYPhysicsBackendTestAccess.h"
+#include "AYPhysics/PhysicsBackendTestAccess.h"
 
 #if defined(AYPHYSICS_HAS_JOLT)
 #include "JoltBackend3D.h"

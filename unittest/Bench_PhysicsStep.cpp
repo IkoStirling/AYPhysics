@@ -38,10 +38,10 @@
 // the physics thread consumed them, exhausting PhysicsCreatePool. R1.5c
 // attempt #2 explicitly drains the setup phase before recording.
 
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsBackendTestAccess.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsBackendTestAccess.h"
 
 #include <algorithm>
 #include <atomic>

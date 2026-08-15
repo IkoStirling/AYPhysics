@@ -1,5 +1,5 @@
 #pragma once
-// AYPhysicsSubSystem.h - GameLoop integration (§11 / E-1)
+// AYPhysics/PhysicsSubSystem.h - GameLoop integration (§11 / E-1)
 //
 // PhysicsSubSystem : ISubSystem. Owns PhysicsManager for the subsystem
 // lifetime. GameLoop calls fixedUpdate() → step + fetchResults + E-3
@@ -8,8 +8,8 @@
 // Registration: ayt::app::registerPhysicsModule() (AYApplication) or
 // PhysicsSubSystem::registerSubSystem(desc) directly.
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsQueryAdapter.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsQueryAdapter.h"
 
 #include <AYGameLoop.h>
 

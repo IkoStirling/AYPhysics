@@ -1,6 +1,6 @@
-#include "AYPhysicsEventBridge.h"
+#include "AYPhysics/PhysicsEventBridge.h"
 
-#include <ayevent/Events/PhysicsEvents.h>
+#include <AYEventSystem/Events/PhysicsEvents.h>
 
 namespace ayt::physics {
 namespace {

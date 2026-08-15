@@ -1,6 +1,6 @@
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld2D.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld2D.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #if defined(AYPHYSICS_HAS_BOX2D)
 #include "Box2DBackend2D.h"

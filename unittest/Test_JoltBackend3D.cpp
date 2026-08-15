@@ -1,6 +1,6 @@
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #if defined(AYPHYSICS_HAS_JOLT)
 #include "JoltBackend3D.h"

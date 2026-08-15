@@ -27,21 +27,21 @@ set(SRC_FILES
 
 set(HEAD_FILES
     AYPhysics.h
-    include/AYPhysicsHandles.h
-    include/AYPhysicsTypes.h
-    include/AYPhysicsCommandQueue.h
-    include/AYPhysicsManager.h
-    include/AYPhysicsWorld3D.h
-    include/AYPhysicsWorld2D.h
-    include/AYPhysicsSubSystem.h
-    include/AYPhysicsEventBridge.h
-    include/AYPhysicsQueryAdapter.h
-    include/AYPhysicsBackendTestAccess.h
-    interface/IPhysicsBackend.h
-    interface/IPhysicsBackend3D.h
-    interface/IPhysicsBackend2D.h
-    interface/IPhysicsQuery.h
-    interface/PhysicsScene.h
+    include/AYPhysics/PhysicsHandles.h
+    include/AYPhysics/PhysicsTypes.h
+    include/AYPhysics/PhysicsCommandQueue.h
+    include/AYPhysics/PhysicsManager.h
+    include/AYPhysics/PhysicsWorld3D.h
+    include/AYPhysics/PhysicsWorld2D.h
+    include/AYPhysics/PhysicsSubSystem.h
+    include/AYPhysics/PhysicsEventBridge.h
+    include/AYPhysics/PhysicsQueryAdapter.h
+    include/AYPhysics/PhysicsBackendTestAccess.h
+    interface/AYPhysics/IPhysicsBackend.h
+    interface/AYPhysics/IPhysicsBackend3D.h
+    interface/AYPhysics/IPhysicsBackend2D.h
+    interface/AYPhysics/IPhysicsQuery.h
+    interface/AYPhysics/PhysicsScene.h
 )
 
 # =============================================================================

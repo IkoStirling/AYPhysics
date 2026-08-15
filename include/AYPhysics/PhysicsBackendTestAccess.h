@@ -1,11 +1,11 @@
 #pragma once
-// AYPhysicsBackendTestAccess.h - test-only inspection (mirror AYAudio)
+// AYPhysics/PhysicsBackendTestAccess.h - test-only inspection (mirror AYAudio)
 //
 // Provides read-only views into MockBackend3D state for unit tests.
 // Production code MUST NOT include this header; see CLAUDE.md "新增模块要求".
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
 
 #include <vector>
 

@@ -426,7 +426,7 @@ struct PhysFrameSnapshot {
 
 ## 6. Backend abstraction (`IPhysicsBackend*`)
 
-Following the `interface/IAudioBackend.h` convention.
+Following the `interface/AYAudio/IAudioBackend.h` convention.
 
 ### 6.1 Layer diagram
 
@@ -449,7 +449,7 @@ Following the `interface/IAudioBackend.h` convention.
 ### 6.2 Common interface
 
 ```cpp
-// interface/IPhysicsBackend.h
+// interface/AYPhysics/IPhysicsBackend.h
 namespace ayt::physics {
 
 struct PhysicsBackendInfo {
@@ -488,7 +488,7 @@ public:
 ### 6.3 3D-specific interface (R1 stub; populates after B-6)
 
 ```cpp
-// interface/IPhysicsBackend3D.h
+// interface/AYPhysics/IPhysicsBackend3D.h
 namespace ayt::physics {
 class IPhysicsBackend3D : public IPhysicsBackend {
 public:
@@ -504,7 +504,7 @@ public:
 ### 6.4 2D-specific interface (R1 placeholder)
 
 ```cpp
-// interface/IPhysicsBackend2D.h
+// interface/AYPhysics/IPhysicsBackend2D.h
 namespace ayt::physics {
 class IPhysicsBackend2D : public IPhysicsBackend {
 public:
@@ -518,7 +518,7 @@ public:
 | Backend | File | Purpose |
 |---|---|---|
 | `NullBackend3D` | `backend/NullBackend3D.{h,cpp}` | All commands NoOp; used for headless CI / determinism gate |
-| `MockBackend3D` | `backend/MockBackend3D.{h,cpp}` | Captures command stream for tests; exposes `inspectMockBackend()` via `AYPhysicsBackendTestAccess.h` |
+| `MockBackend3D` | `backend/MockBackend3D.{h,cpp}` | Captures command stream for tests; exposes `inspectMockBackend()` via `AYPhysics/PhysicsBackendTestAccess.h` |
 | `JoltBackend3D` | `backend/JoltBackend3D.{h,cpp}` | R1 = stub; R1.5 = real implementation; **only TU** that includes `<Jolt/Jolt.h>` |
 
 ---
@@ -1013,20 +1013,20 @@ AYRuntime/AYPhysics/
 ├── AYPhysics.h                        # umbrella include
 │
 ├── interface/
-│   ├── IPhysicsBackend.h              # base interface
-│   ├── IPhysicsBackend3D.h            # 3D interface
-│   ├── IPhysicsBackend2D.h            # 2D interface (placeholder R1)
-│   └── PhysicsScene.h                 # scene / ID space
+│   ├── AYPhysics/IPhysicsBackend.h              # base interface
+│   ├── AYPhysics/IPhysicsBackend3D.h            # 3D interface
+│   ├── AYPhysics/IPhysicsBackend2D.h            # 2D interface (placeholder R1)
+│   └── AYPhysics/PhysicsScene.h                 # scene / ID space
 │
 ├── include/
-│   ├── AYPhysicsTypes.h               # handles / PhysResult / descriptors
-│   ├── AYPhysicsManager.h             # public manager
-│   ├── AYPhysicsWorld3D.h             # 3D world API
-│   ├── AYPhysicsWorld2D.h             # 2D world API
-│   ├── AYPhysicsCommandQueue.h        # compact SPSC + CreatePool (public for tests)
-│   ├── AYPhysicsHandles.h             # pack/unpack index+generation helpers
-│   ├── AYPhysicsSubSystem.h           # GameLoop integration
-│   ├── AYPhysicsBackendTestAccess.h   # test-only inspection (mirror AYAudio)
+│   ├── AYPhysics/PhysicsTypes.h               # handles / PhysResult / descriptors
+│   ├── AYPhysics/PhysicsManager.h             # public manager
+│   ├── AYPhysics/PhysicsWorld3D.h             # 3D world API
+│   ├── AYPhysics/PhysicsWorld2D.h             # 2D world API
+│   ├── AYPhysics/PhysicsCommandQueue.h        # compact SPSC + CreatePool (public for tests)
+│   ├── AYPhysics/PhysicsHandles.h             # pack/unpack index+generation helpers
+│   ├── AYPhysics/PhysicsSubSystem.h           # GameLoop integration
+│   ├── AYPhysics/PhysicsBackendTestAccess.h   # test-only inspection (mirror AYAudio)
 │   ├── AYPhysicsCloth.h               # R3+ placeholder
 │   ├── AYPhysicsFluid.h               # R3+ placeholder
 │   └── AYPhysicsParticle.h            # R3+ placeholder
@@ -1129,7 +1129,7 @@ AYRuntime/AYPhysics/
 |------|--------|
 | 2026-07-30 | **v0.3 / R1.5b ship** — Status reflects R1.5b completion (commit `8de0529`, 172/172 tests); §3.1 Backend lane split into B-1..B-10 (B-6/B-7 ✅ shipped; B-8 R1.5c Bench next; B-9 R2 3D; B-10 R2.5 2D); §4.2 2D backend locked = Box2D 3.x flat-API (was TBD); §16.1 phases split R1.5 into R1.5a/b/c; §16.2 added 10 landmine-decision rows (Jolt API surface + UserData round-trip + SetShape mass preservation + ConstraintSettings lock + publishSnapshot swap-then-clear + JPH::Allocate init + Bench mandatory); vcpkg package name = `Jolt` (not `joltphysics`) reaffirmed in §4.1. **Box2D 3.x flat-API (`b2CreateWorld` / `b2BodyId` / `b2Vec2{x,y}`) is MANDATORY in R2.5** — legacy 2.4 OO style (`b2World*` / `w->CreateBody`) is forbidden. |
 | 2026-07-31 | **v0.4 / R1.5c ship — §17.8 gate closed (10/10)** — `Bench_PhysicsStep` added as standalone executable (`unittest/Bench_PhysicsStep.cpp`, built only when `AYPHYSICS_BUILD_JOLT`); measures end-to-end frame wall time (enqueue + drain + step + publish), not just enqueue cost; supports `--scenario` / `--frames` / `--bodies` / `-w` flags. Defaults reduced to 1000 bodies / 60 frames for cross-host compatibility; design target (10000 / 600) is the fast-host re-run command. **§17.8 gate closed via `-w` waiver on slow reference host**: P1/P2/P3 step avg ≈ 15.5 ms (waived >4 / >12 / >14 ms), sleep fraction 1.7% (waived <70%), queueReject PASS. step time stays below the 16.67 ms 60-fps budget on the slow host. Numbers + waiver documented in `docs/perf_R15.md`. New build target: `d:/tmp/build_ayphysics_jolt.bat` (R1.5c variant, builds + tests + benches). |
-| 2026-07-31 | **v0.5 / R2.0a ship — 3D ConvexHull + TriangleMesh + Heightfield shapes (B-9a)** — `ColliderShapeData` struct (hullPoints / meshVertices / meshIndices / heightSamples / heightGridN) added to `include/AYPhysicsTypes.h`; `ColliderDesc.shapeData` field of type `std::shared_ptr<const ColliderShapeData>` (O(1) refcount copies through `PhysicsCreatePool`; natural upgrade path to R5 cooked assets). `JoltBackend3D::makeShape` extended with 3 new cases that cook via JPH::ConvexHullShapeSettings / MeshShapeSettings / HeightFieldShapeSettings. **MustBeStatic validation**: Mesh / Heightfield shapes reject non-static body colliders (Jolt asserts otherwise); bumped `_notFoundCount` + returned invalid handle. New TU `unittest/Test_JoltBackend3D_AdvancedShapes.cpp` adds 11 TEST_CASEs (10 Jolt-gated: 4 happy-path incl. Hull-on-Mesh canonical stack, 2 MustBeStatic rejection, 4 malformed-input rejection; 1 Mock-only: shared_ptr round-trip proves the type change doesn't break Jolt-free consumers). Extracted shared header `unittest/Test_JoltBackend3D_Helpers.h` for `makeJoltMgr` / `waitForDrain` reuse across TUs. **Removed** `Real_ColliderShapeUnsupportedReturnsNoOp` from R1.5b baseline (false-positive: used ConvexHull as "unsupported" sentinel; reintroduce in R2.0b for Spring/Slider/Point/Cone joint types). §3.1 B-9 split into B-9a (R2.0a shapes) / B-9b (R2.0b–d joints + listener + impulse-at-point). CLAUDE.md "新增 collider shape" step 2 updated to mention `shared_ptr<const ColliderShapeData>`. **Known fidelity gap acknowledged**: ConvexHull bodies get identity inertia tensor (R1.5b landmine #7 — `inUpdateMassProperties=false` + identity override); fix deferred to R2.0b cleanup pass. **Known leak acknowledged**: `shapeCache` never releases on `DestroyCollider` (pre-existing); materially worse with mesh/heightfield sizes; revisit in R2.5 cleanup or R5 cooked-asset rework.
+| 2026-07-31 | **v0.5 / R2.0a ship — 3D ConvexHull + TriangleMesh + Heightfield shapes (B-9a)** — `ColliderShapeData` struct (hullPoints / meshVertices / meshIndices / heightSamples / heightGridN) added to `include/AYPhysics/PhysicsTypes.h`; `ColliderDesc.shapeData` field of type `std::shared_ptr<const ColliderShapeData>` (O(1) refcount copies through `PhysicsCreatePool`; natural upgrade path to R5 cooked assets). `JoltBackend3D::makeShape` extended with 3 new cases that cook via JPH::ConvexHullShapeSettings / MeshShapeSettings / HeightFieldShapeSettings. **MustBeStatic validation**: Mesh / Heightfield shapes reject non-static body colliders (Jolt asserts otherwise); bumped `_notFoundCount` + returned invalid handle. New TU `unittest/Test_JoltBackend3D_AdvancedShapes.cpp` adds 11 TEST_CASEs (10 Jolt-gated: 4 happy-path incl. Hull-on-Mesh canonical stack, 2 MustBeStatic rejection, 4 malformed-input rejection; 1 Mock-only: shared_ptr round-trip proves the type change doesn't break Jolt-free consumers). Extracted shared header `unittest/Test_JoltBackend3D_Helpers.h` for `makeJoltMgr` / `waitForDrain` reuse across TUs. **Removed** `Real_ColliderShapeUnsupportedReturnsNoOp` from R1.5b baseline (false-positive: used ConvexHull as "unsupported" sentinel; reintroduce in R2.0b for Spring/Slider/Point/Cone joint types). §3.1 B-9 split into B-9a (R2.0a shapes) / B-9b (R2.0b–d joints + listener + impulse-at-point). CLAUDE.md "新增 collider shape" step 2 updated to mention `shared_ptr<const ColliderShapeData>`. **Known fidelity gap acknowledged**: ConvexHull bodies get identity inertia tensor (R1.5b landmine #7 — `inUpdateMassProperties=false` + identity override); fix deferred to R2.0b cleanup pass. **Known leak acknowledged**: `shapeCache` never releases on `DestroyCollider` (pre-existing); materially worse with mesh/heightfield sizes; revisit in R2.5 cleanup or R5 cooked-asset rework.
 | 2026-07-20 | **v0.2 / R0.1** — Closed industrial-perf gaps: anti-goals for fat commands / gen-less handles / dense snapshots; §5.2 compact command + create pool; §5.3 sparse snapshot; §5.4 drain/backpressure/sync mailbox; §7.1 packed handles; query Async/Sync API; §17 Performance & Jolt contracts + R1.5 gate. |
 | 2026-07-20 | **R0 / v0.1** — 16-chapter industrial rewrite aligned with AYUI/AYAudio/AYRenderer; Goals/Anti-Goals; backend abstraction; SPSC; determinism §10. |
 | 2026-07-09 | Dual-path Physics-A/B summary (now §10). |
@@ -1237,7 +1237,7 @@ Workers **never** enqueue into the game SPSC. Only the physics thread owns comma
 
 PR description must tick:
 
-- [x] `static_assert(sizeof(PhysicsCommand) <= 64)` — R1 (`AYPhysicsCommandQueue.h:77`)
+- [x] `static_assert(sizeof(PhysicsCommand) <= 64)` — R1 (`AYPhysics/PhysicsCommandQueue.h:77`)
 - [x] Create pool path used for all create* commands; no desc structs in ring slots — R1
 - [x] Generation handles validated on mutate/destroy — R1
 - [x] Snapshot omits sleeping (unless `alwaysSync`); no dense-by-handle array — R1.5b (`publishSnapshot` iterates active + alwaysSync set)

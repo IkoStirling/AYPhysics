@@ -1,11 +1,11 @@
 #pragma once
-// IPhysicsQuery.h — narrow Host-facing physics query facade (§6 progressive)
+// AYPhysics/IPhysicsQuery.h — narrow Host-facing physics query facade (§6 progressive)
 //
 // Gameplay should prefer host->physicsQuery() over PhysicsManager::* when only
 // raycasts / overlaps are needed. Mutators stay on PhysicsManager / worlds.
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsHandles.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsHandles.h"
 
 #include "AYMath/MathGeometry.h"
 #include "AYMath/MathTypes.h"

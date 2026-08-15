@@ -4,7 +4,7 @@
 // Public header MUST NOT include <box2d/...>. All Box2D types live in the .cpp
 // behind class Impl (Pimpl) per design.md §17.8 item 10.
 
-#include "IPhysicsBackend2D.h"
+#include "AYPhysics/IPhysicsBackend2D.h"
 
 #include <cstdint>
 #include <memory>

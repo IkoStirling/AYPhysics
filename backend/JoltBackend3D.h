@@ -11,7 +11,7 @@
 // header. Any code that calls these helpers must #include <Jolt/...> itself
 // (only the .cpp does).
 
-#include "IPhysicsBackend3D.h"
+#include "AYPhysics/IPhysicsBackend3D.h"
 
 #include <cstdint>
 #include <memory>

@@ -1,8 +1,8 @@
 #pragma once
-// AYPhysicsWorld2D.h - 2D world public API (§9, R2.5 Box2D)
+// AYPhysics/PhysicsWorld2D.h - 2D world public API (§9, R2.5 Box2D)
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsHandles.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsHandles.h"
 
 #include <cstdint>
 #include <vector>

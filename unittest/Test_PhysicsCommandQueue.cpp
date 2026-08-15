@@ -1,4 +1,4 @@
-#include "AYPhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
 
 #include "AYTest.h"
 

@@ -1,6 +1,6 @@
-#include "AYPhysicsWorld2D.h"
+#include "AYPhysics/PhysicsWorld2D.h"
 
-#include "AYPhysicsManager.h"
+#include "AYPhysics/PhysicsManager.h"
 
 namespace ayt::physics {
 

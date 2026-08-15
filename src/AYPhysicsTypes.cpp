@@ -1,4 +1,4 @@
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 namespace ayt::physics {
 

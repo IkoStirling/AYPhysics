@@ -3,9 +3,9 @@
 //
 // Used by unit tests to verify compact command sequence, create-pool
 // resolution, and async query id flow. Test inspection lives in
-// AYPhysicsBackendTestAccess.h.
+// AYPhysics/PhysicsBackendTestAccess.h.
 
-#include "IPhysicsBackend3D.h"
+#include "AYPhysics/IPhysicsBackend3D.h"
 
 #include <mutex>
 #include <vector>
@@ -40,7 +40,7 @@ public:
     PhysicsBackendInfo describe() const override;
     bool isRealDevice() const override { return false; }
 
-    // Test access via AYPhysicsBackendTestAccess.h.
+    // Test access via AYPhysics/PhysicsBackendTestAccess.h.
     void resetCapturedState();
 
 private:

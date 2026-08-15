@@ -1,11 +1,11 @@
 #pragma once
-// IPhysicsBackend3D.h - 3D backend interface (§6.3)
+// AYPhysics/IPhysicsBackend3D.h - 3D backend interface (§6.3)
 //
 // 3D-specific mutators are called from the physics thread only.
 // World3D already allocated the handle (index + generation); backend binds
 // its native body to that handle slot.
 
-#include "IPhysicsBackend.h"
+#include "AYPhysics/IPhysicsBackend.h"
 
 namespace ayt::physics {
 

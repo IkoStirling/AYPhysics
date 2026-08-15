@@ -1,5 +1,5 @@
 #pragma once
-// AYPhysicsCommandQueue.h - compact SPSC command queue + create pool (§5.2, §17.1)
+// AYPhysics/PhysicsCommandQueue.h - compact SPSC command queue + create pool (§5.2, §17.1)
 //
 // Hard contracts:
 //   sizeof(PhysicsCommand) <= 64 (static_asserted).
@@ -8,9 +8,9 @@
 //   Power-of-2 capacity; min 2; max 65536.
 //   Cross-thread: game thread = tryPush; physics thread = tryPop.
 //
-// Test-only inspection lives in AYPhysicsBackendTestAccess.h.
+// Test-only inspection lives in AYPhysics/PhysicsBackendTestAccess.h.
 
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #include <atomic>
 #include <cstdint>

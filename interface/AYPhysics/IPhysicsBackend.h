@@ -1,12 +1,12 @@
 #pragma once
-// IPhysicsBackend.h - common base interface for physics backends (§6.2)
+// AYPhysics/IPhysicsBackend.h - common base interface for physics backends (§6.2)
 //
 // All methods are called from the physics thread only (except describe/isRealDevice).
 // Public headers never include backend-specific headers (Jolt, Box2D, etc.); backend
 // types live only in backend/<Xxx>Backend3D.cpp.
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
 
 namespace ayt::physics {
 

@@ -1,5 +1,5 @@
 #pragma once
-// PhysicsScene.h - per-world handle allocator (§7.1, §17.4)
+// AYPhysics/PhysicsScene.h - per-world handle allocator (§7.1, §17.4)
 //
 // Each PhysicsWorld{2D,3D} owns a HandleAllocator. Generation wraps 1..4095
 // (0 reserved for invalid). Index reuses from a free list; on reuse,
@@ -7,8 +7,8 @@
 //
 // This header is forward-friendly: backend impls need only the public API.
 
-#include "AYPhysicsHandles.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsHandles.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #include <vector>
 

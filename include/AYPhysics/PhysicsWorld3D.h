@@ -1,13 +1,13 @@
 #pragma once
-// AYPhysicsWorld3D.h - 3D world public API (§9)
+// AYPhysics/PhysicsWorld3D.h - 3D world public API (§9)
 //
 // Game-thread enqueue. All mutators return PhysResult and (for create*) write a
 // new handle into an out-parameter. On failure the out-param is set to Invalid.
 // Use query dual-path (§5.1): *Async returns queryId (result next fetchResults),
 // *Sync blocks on the mailbox (same-frame).
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsHandles.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsHandles.h"
 
 #include <cstdint>
 #include <vector>

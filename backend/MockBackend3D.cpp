@@ -64,13 +64,13 @@ public:
 } // namespace ayt::physics
 
 // =============================================================================
-// AYPhysicsBackendTestAccess.h implementation (test-only)
+// AYPhysics/PhysicsBackendTestAccess.h implementation (test-only)
 // =============================================================================
 //
 // Defined here (the .cpp) rather than the public header so production code does
 // not pull the dependency.
 
-#include "AYPhysicsBackendTestAccess.h"
+#include "AYPhysics/PhysicsBackendTestAccess.h"
 
 namespace ayt::physics::testaccess {
 

@@ -1,12 +1,12 @@
 #pragma once
-// AYPhysicsManager.h - public manager entry (§9, §4.5)
+// AYPhysics/PhysicsManager.h - public manager entry (§9, §4.5)
 //
 // Construction-time backend selection (no runtime swap). step() is enqueue + return.
 // fetchResults() returns the latest sparse PhysFrameSnapshot for game-thread read.
 // shutdown() drains the queue, joins the physics thread.
 
-#include "AYPhysicsTypes.h"
-#include "AYPhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
 
 #include <memory>
 #include <thread>

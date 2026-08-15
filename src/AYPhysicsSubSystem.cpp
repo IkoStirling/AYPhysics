@@ -1,7 +1,7 @@
-#include "AYPhysicsSubSystem.h"
+#include "AYPhysics/PhysicsSubSystem.h"
 
-#include "AYPhysicsEventBridge.h"
-#include "AYPhysicsManager.h"
+#include "AYPhysics/PhysicsEventBridge.h"
+#include "AYPhysics/PhysicsManager.h"
 
 #include <AYGameLoop.h>
 

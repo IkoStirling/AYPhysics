@@ -1,4 +1,4 @@
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 // Placeholder TU for future Collider runtime object. R1 keeps colliders as
 // backend-side natives; address via ColliderHandle. See CLAUDE.md.

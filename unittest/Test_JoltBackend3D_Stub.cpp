@@ -1,7 +1,7 @@
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsTypes.h"
-#include "IPhysicsBackend3D.h"  // needed to call backend3D()->isRealDevice()
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/IPhysicsBackend3D.h"  // needed to call backend3D()->isRealDevice()
 
 #if defined(AYPHYSICS_HAS_JOLT)
 #include "JoltBackend3D.h"

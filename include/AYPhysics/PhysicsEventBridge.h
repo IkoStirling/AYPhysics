@@ -1,13 +1,13 @@
 #pragma once
-// AYPhysicsEventBridge.h — E-3: snapshot collisions → EventBus
+// AYPhysics/PhysicsEventBridge.h — E-3: snapshot collisions → EventBus
 //
 // Maps PhysFrameSnapshot::collisionEvents onto ayt::event::PhysicsCollisionEvent
 // on the game/main thread (after PhysicsManager::fetchResults). Does not post
 // from ContactListener / physics-thread publishSnapshot.
 
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsTypes.h"
 
-#include <ayevent/EventBus.h>
+#include <AYEventSystem/EventBus.h>
 
 #include <cstddef>
 #include <span>

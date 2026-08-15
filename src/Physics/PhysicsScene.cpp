@@ -1,4 +1,4 @@
-#include "PhysicsScene.h"
+#include "AYPhysics/PhysicsScene.h"
 
 namespace ayt::physics {
 

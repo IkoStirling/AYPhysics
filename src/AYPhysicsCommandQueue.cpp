@@ -1,5 +1,5 @@
-#include "AYPhysicsCommandQueue.h"
-#include "IPhysicsBackend.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
+#include "AYPhysics/IPhysicsBackend.h"
 
 #include "AYTime/Duration.h"
 

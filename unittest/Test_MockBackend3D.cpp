@@ -1,7 +1,7 @@
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
-#include "AYPhysicsBackendTestAccess.h"
-#include "AYPhysicsTypes.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
+#include "AYPhysics/PhysicsBackendTestAccess.h"
+#include "AYPhysics/PhysicsTypes.h"
 
 #include "AYTest.h"
 

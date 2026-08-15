@@ -1,14 +1,14 @@
 #pragma once
-// AYPhysicsTypes.h - public types for AYPhysics
+// AYPhysics/PhysicsTypes.h - public types for AYPhysics
 //
 // Conventions:
 //   - All types live in namespace ayt::physics
 //   - Handles are packed uint32 (index 20 bits + generation 12 bits), invalid=0
 //   - PhysResult covers all failure modes; PhysResult::Ok == 0
-//   - Compact PhysicsCommand (see AYPhysicsCommandQueue.h) does NOT embed these descriptors;
+//   - Compact PhysicsCommand (see AYPhysics/PhysicsCommandQueue.h) does NOT embed these descriptors;
 //     create payloads live in PhysicsCreatePool out-of-band.
 
-#include "AYPhysicsHandles.h"
+#include "AYPhysics/PhysicsHandles.h"
 
 #include <cstdint>
 #include <memory>

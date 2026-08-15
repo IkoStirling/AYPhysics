@@ -1,7 +1,7 @@
-#include "AYPhysicsQueryAdapter.h"
+#include "AYPhysics/PhysicsQueryAdapter.h"
 
-#include "AYPhysicsManager.h"
-#include "AYPhysicsWorld3D.h"
+#include "AYPhysics/PhysicsManager.h"
+#include "AYPhysics/PhysicsWorld3D.h"
 
 namespace ayt::physics
 {
