@@ -17,6 +17,7 @@ set(SRC_FILES
     src/AYPhysicsWorld3D.cpp
     src/AYPhysicsWorld2D.cpp
     src/AYPhysicsSubSystem.cpp
+    src/AYPhysicsQueryAdapter.cpp
     src/Physics/PhysicsScene.cpp
     src/Physics/Rigidbody.cpp
     src/Physics/Collider.cpp
@@ -32,10 +33,12 @@ set(HEAD_FILES
     include/AYPhysicsWorld3D.h
     include/AYPhysicsWorld2D.h
     include/AYPhysicsSubSystem.h
+    include/AYPhysicsQueryAdapter.h
     include/AYPhysicsBackendTestAccess.h
     interface/IPhysicsBackend.h
     interface/IPhysicsBackend3D.h
     interface/IPhysicsBackend2D.h
+    interface/IPhysicsQuery.h
     interface/PhysicsScene.h
 )
 
@@ -228,6 +231,7 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     AYMath
     AYPlatform   # Thread::yield/sleep used by _physicsThreadMain idle backoff
     AYTime       # Duration / TimePoint / Clock (header-only v1.2 value-type)
+    AYGameLoop   # E-1: PhysicsSubSystem : ISubSystem
 )
 
 if(AYPHYSICS_BUILD_JOLT)

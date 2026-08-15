@@ -8,6 +8,7 @@
 #include "AYPhysicsWorld2D.h"
 #include "AYPhysicsManager.h"
 #include "AYPhysicsSubSystem.h"
+#include "IPhysicsQuery.h"
 // IPhysicsBackend* are reachable via the Manager; do not include here to
 // avoid dragging backend-specific headers into consumers.
 // #include "IPhysicsBackend.h"

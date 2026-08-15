@@ -1,36 +1,61 @@
 #pragma once
-// AYPhysicsSubSystem.h - GameLoop integration (§11)
+// AYPhysicsSubSystem.h - GameLoop integration (§11 / E-1)
 //
-// R1 stub: declares the SubSystem interface; concrete impl lives in
-// src/AYPhysicsSubSystem.cpp. GameLoop wiring is R3 (E-1).
+// PhysicsSubSystem : ISubSystem. Owns PhysicsManager for the subsystem
+// lifetime. GameLoop calls fixedUpdate() → step + fetchResults (physics
+// owns the fixed timestep). update() is a no-op.
+//
+// Registration: ayt::app::registerPhysicsModule() (AYApplication) or
+// PhysicsSubSystem::registerSubSystem(desc) directly.
 
 #include "AYPhysicsTypes.h"
+#include "AYPhysicsQueryAdapter.h"
+
+#include <AYGameLoop.h>
 
 #include <memory>
 
 namespace ayt::physics {
 
 class PhysicsManager;
+class IPhysicsQuery;
 
-// Lightweight wrapper for GameLoop registration. Owns the manager for the
-// subsystem's lifetime; on update() calls step() and fetchResults().
-class PhysicsSubSystem {
+class PhysicsSubSystem : public ayt::game::ISubSystem {
 public:
     PhysicsSubSystem();
-    ~PhysicsSubSystem();
+    ~PhysicsSubSystem() override;
 
-    bool initialize(const PhysicsBackendDescriptor& desc);
-    void shutdown();
+    /// Most recent live instance (GameLoop typically owns one).
+    static PhysicsSubSystem* findRegistered() { return s_instance; }
 
-    void update(float deltaTime);   // step + fetchResults
-    void fixedUpdate(float fixedDeltaTime);  // no-op for now; Jolt takes over in R1.5
+    /// Register into GameLoop. Optional descriptor applied before initialize().
+    static void registerSubSystem(const PhysicsBackendDescriptor& desc = {});
+
+    const char* getName() const override { return "Physics"; }
+    const ayt::game::SubSystemDescriptor& getDescriptor() const override;
+
+    /// Install backend descriptor before initialize(). No-op after init.
+    void setDescriptor(const PhysicsBackendDescriptor& desc);
+
+    bool initialize() override;
+    void update(float deltaTime) override;
+    void fixedUpdate(float fixedDeltaTime) override;
+    void shutdown() override;
 
     PhysicsManager* manager() { return _manager.get(); }
+    const PhysicsManager* manager() const { return _manager.get(); }
+
+    /// Narrow query facade (bound after successful initialize).
+    IPhysicsQuery* query() { return &_query; }
 
 private:
     std::unique_ptr<PhysicsManager> _manager;
+    PhysicsQueryAdapter _query;
     PhysicsBackendDescriptor _descriptor{};
+    ayt::game::SubSystemDescriptor _loopDescriptor{};
     bool _initialized = false;
+
+    static PhysicsSubSystem* s_instance;
 };
 
 } // namespace ayt::physics
