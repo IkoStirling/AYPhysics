@@ -17,6 +17,7 @@ set(SRC_FILES
     src/AYPhysicsWorld3D.cpp
     src/AYPhysicsWorld2D.cpp
     src/AYPhysicsSubSystem.cpp
+    src/AYPhysicsEventBridge.cpp
     src/AYPhysicsQueryAdapter.cpp
     src/Physics/PhysicsScene.cpp
     src/Physics/Rigidbody.cpp
@@ -33,6 +34,7 @@ set(HEAD_FILES
     include/AYPhysicsWorld3D.h
     include/AYPhysicsWorld2D.h
     include/AYPhysicsSubSystem.h
+    include/AYPhysicsEventBridge.h
     include/AYPhysicsQueryAdapter.h
     include/AYPhysicsBackendTestAccess.h
     interface/IPhysicsBackend.h
@@ -233,6 +235,8 @@ target_link_libraries(${MODULE_NAME} PUBLIC
     AYTime       # Duration / TimePoint / Clock (header-only v1.2 value-type)
     AYGameLoop   # E-1: PhysicsSubSystem : ISubSystem
 )
+# E-3: PhysicsEventBridge posts PhysicsCollisionEvent onto EventBus.
+target_link_libraries(${MODULE_NAME} PRIVATE AYEventSystem)
 
 if(AYPHYSICS_BUILD_JOLT)
     target_link_libraries(${MODULE_NAME} PRIVATE ${AYPHYSICS_JOLT_TARGET})

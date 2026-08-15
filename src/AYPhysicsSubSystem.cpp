@@ -1,5 +1,6 @@
 #include "AYPhysicsSubSystem.h"
 
+#include "AYPhysicsEventBridge.h"
 #include "AYPhysicsManager.h"
 
 #include <AYGameLoop.h>
@@ -80,7 +81,10 @@ void PhysicsSubSystem::fixedUpdate(float fixedDeltaTime)
         return;
     }
     (void)_manager->step(fixedDeltaTime);
-    (void)_manager->fetchResults();
+    // E-3: fan out snapshot collisions on the game thread (not from
+    // ContactListener / physics-thread publishSnapshot).
+    const PhysFrameSnapshot& snap = _manager->fetchResults();
+    (void)publishCollisionEventsToBus(snap);
 }
 
 } // namespace ayt::physics

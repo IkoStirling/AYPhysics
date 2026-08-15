@@ -154,7 +154,7 @@ Following the AYUI §3 R-*/C-*/U-* lane convention: `B-*` = backend, `E-*` = eng
 |------|-------|---------------|
 | **E-1** | `PhysicsSubSystem : ayt::game::ISubSystem` registered in GameLoop | Loop pump calls `step(dt)` |
 | **E-2** | `RigidbodyComponent` / `ColliderComponent` in AYEntity | Entity drives physics state |
-| **E-3** | `PhysicsEventBridge` → `AYEventSystem` typed events (collision enter/stay/exit) | Events delivered on main thread |
+| **E-3** | `PhysicsEventBridge` → `AYEventSystem` typed events (collision enter/stay/exit) | ✅ Events delivered on main thread (`fixedUpdate` after `fetchResults`) |
 
 ### 3.3 Resource lane
 
@@ -1184,7 +1184,7 @@ All items live only in `backend/JoltBackend3D.cpp` (+ private `.h`). Public head
 | **Body interface** | Prefer `BodyInterface` locking APIs on the physics thread; **no** game-thread `BodyLock` |
 | **ObjectLayer** | Map `PhysLayer` (≤ 32) → `JPH::ObjectLayer`; default table: Static/Dynamic/Character/Trigger/Debris |
 | **BroadPhaseLayer** | At least `BP_NON_MOVING` / `BP_MOVING`; `ObjectVsBroadPhaseLayerFilter` + `ObjectLayerPairFilter` implement `collideMask` |
-| **ContactListener** | Implemented; emit enter/stay/exit into snapshot `collisionEvents` (game thread consumes via E-3 bus later) |
+| **ContactListener** | Implemented; emit enter/stay/exit into snapshot `collisionEvents`; E-3 `PhysicsEventBridge` posts `PhysicsCollisionEvent` on game thread |
 | **BodyActivationListener** | Optional R1.5; required before editor sleep viz (ED-3) |
 | **MotionQuality** | Default Discrete; `RigidbodyDesc.enableCCD == true` → LinearCast |
 | **CCD / character / vehicle** | Character + Vehicle = R2+ features; CCD flag only in R1.5 |

@@ -87,7 +87,7 @@ If `vcpkg jolt-physics` is installed, Jolt-backed test variant is built automati
 | **AYCore** | Required: smart pointers, threading primitives |
 | **AYMath** | Required: `FVector3`, `FQuaternion`, `FMatrix4x4` |
 | **AYGameLoop** | Required: `ISubSystem`, frame deltaTime |
-| **AYEventSystem** | R3+: collision events via typed `EventBus` |
+| **AYEventSystem** | E-3: collision events via typed `EventBus` (`PhysicsEventBridge`) |
 | **AYEntity** | R4+: `RigidbodyComponent`, `ColliderComponent` |
 | **AYResource** | R5+: `.physscene` asset loading |
 | **AYRenderer** | Optional: debug-draw line/shape submission |

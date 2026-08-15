@@ -2,8 +2,8 @@
 // AYPhysicsSubSystem.h - GameLoop integration (§11 / E-1)
 //
 // PhysicsSubSystem : ISubSystem. Owns PhysicsManager for the subsystem
-// lifetime. GameLoop calls fixedUpdate() → step + fetchResults (physics
-// owns the fixed timestep). update() is a no-op.
+// lifetime. GameLoop calls fixedUpdate() → step + fetchResults + E-3
+// PhysicsEventBridge (collision → EventBus). update() is a no-op.
 //
 // Registration: ayt::app::registerPhysicsModule() (AYApplication) or
 // PhysicsSubSystem::registerSubSystem(desc) directly.
