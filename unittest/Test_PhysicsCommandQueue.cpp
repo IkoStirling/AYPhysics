@@ -2,7 +2,7 @@
 
 #include "AYTest.h"
 
-#include "ayplatform/Thread.h"
+#include "AYPlatform/Thread.h"
 
 using namespace ayt::physics;
 

@@ -1,7 +1,7 @@
 #include "AYPhysicsCommandQueue.h"
 #include "IPhysicsBackend.h"
 
-#include "aytime/Duration.h"
+#include "AYTime/Duration.h"
 
 #include <bit>                // std::countr_zero (C++20) for F-H/I bit iteration
 #include <cassert>

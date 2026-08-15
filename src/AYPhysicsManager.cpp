@@ -19,7 +19,7 @@
 #include "Box2DBackend2D.h"
 #endif
 
-#include "ayplatform/Thread.h"
+#include "AYPlatform/Thread.h"
 
 namespace ayt::physics {
 

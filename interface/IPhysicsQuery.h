@@ -7,8 +7,8 @@
 #include "AYPhysicsTypes.h"
 #include "AYPhysicsHandles.h"
 
-#include "aymath/MathGeometry.h"
-#include "aymath/MathTypes.h"
+#include "AYMath/MathGeometry.h"
+#include "AYMath/MathTypes.h"
 
 #include <vector>
 

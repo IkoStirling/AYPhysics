@@ -5,8 +5,8 @@
 
 #include "AYTest.h"
 
-#include "aytime/Clock.h"
-#include "ayplatform/Thread.h"
+#include "AYTime/Clock.h"
+#include "AYPlatform/Thread.h"
 
 using namespace ayt::physics;
 

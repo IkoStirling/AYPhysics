@@ -14,8 +14,8 @@
 #include <memory>
 #include <vector>
 
-#include "aymath/MathTypes.h"
-#include "aymath/MathGeometry.h"
+#include "AYMath/MathTypes.h"
+#include "AYMath/MathGeometry.h"
 
 namespace ayt::physics {
 
