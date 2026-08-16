@@ -16,7 +16,7 @@ add_executable(${TEST_TARGET}
     Test_MockBackend3D.cpp
     Test_JoltBackend3D_Stub.cpp
     # R1.5b: real Jolt backend integration tests. Only built when Jolt is
-    # present (the file is empty otherwise ù?it relies on Test_JoltBackend3D_Stub
+    # present (the file is empty otherwise ÔøΩ?it relies on Test_JoltBackend3D_Stub
     # for the no-Jolt regression path).
     Test_JoltBackend3D.cpp
     # R2.0a: advanced collider shapes (ConvexHull / TriangleMesh / Heightfield).
@@ -74,13 +74,12 @@ else()
     target_compile_options(${TEST_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-ay_configure_test_tmpdir(${TEST_TARGET})
-add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+ay_add_test(${TEST_TARGET})
 
 # R1.5c: standalone bench executable (NOT inside AYPhysics_Tests). Built only
-# when Jolt is available (the bench measures real Jolt timing ù?see design.md
-# ß17.2 / ß17.8 item 8). Numbers from this binary are recorded in
-# docs/perf_R15.md before the ß17.8 gate can be ticked.
+# when Jolt is available (the bench measures real Jolt timing ÔøΩ?see design.md
+# ÔøΩ17.2 / ÔøΩ17.8 item 8). Numbers from this binary are recorded in
+# docs/perf_R15.md before the ÔøΩ17.8 gate can be ticked.
 if(AYPHYSICS_BUILD_JOLT)
     set(BENCH_TARGET Bench_PhysicsStep)
 
@@ -112,6 +111,6 @@ if(AYPHYSICS_BUILD_JOLT)
         target_compile_options(${BENCH_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
-    # Not registered with add_test() ù?bench numbers belong in perf_R15.md,
+    # Not registered with add_test() ÔøΩ?bench numbers belong in perf_R15.md,
     # not in CI test results. Run manually with d:/tmp/build_ayphysics_jolt.bat.
 endif()
