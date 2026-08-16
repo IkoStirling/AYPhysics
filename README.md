@@ -100,7 +100,7 @@ If `vcpkg jolt-physics` is installed, Jolt-backed test variant is built automati
 
 See [`design.md` §15](design.md#15-directory-layout-target) for the full target tree.
 
-R1 ships with: `interface/`, `include/`, `backend/{Null,Mock,Jolt}Backend3D.{h,cpp}`, `src/`, `unittest/`.
+Current public layout: `interface/AYPhysics/`, `include/AYPhysics/`, `backend/{Null,Mock,Jolt}Backend3D.{h,cpp}`, `src/`, `unittest/`.
 
 ---
 
