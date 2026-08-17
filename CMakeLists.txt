@@ -64,16 +64,9 @@ set(BACKEND_HEADERS
 # =============================================================================
 # Jolt integration (R1.5 real impl; stub before R1.5b body work)
 # =============================================================================
-# Three-tier fallback (mirrors AYAudio/CMakeLists.txt find_path pattern with
-# vcpkg-aware defaults):
-#   1) find_package(Jolt CONFIG) - vcpkg port `jolt-physics` exports its CMake
-#      config at share/Jolt/JoltConfig.cmake with target name `Jolt::Jolt`.
-#      Use this when present.
-#   2) Header-only fallback via find_path(Jolt/Jolt.h) under $VCPKG_ROOT or the
-#      project's vcpkg/installed/x64-windows/include. Requires the user to
-#      provide Jolt.lib on the link line (JOLT_LIB CMake variable, set by
-#      find_library inside this block).
-#   3) AYPHYSICS_BUILD_JOLT=OFF -> define AYPHYSICS_NO_JOLT and exclude
+# Resolution uses find_package so vcpkg manifest mode, a custom toolchain, and
+# ordinary CMAKE_PREFIX_PATH installs all work without machine-specific paths.
+# AYPHYSICS_BUILD_JOLT=OFF defines AYPHYSICS_NO_JOLT and excludes
 #      JoltBackend3D TU entirely. PhysicsManager falls back to NullBackend3D
 #      when kind3D == BackendKind::DefaultJolt (R1 behaviour preserved).
 #
@@ -82,59 +75,17 @@ set(BACKEND_HEADERS
 # `find_package(joltphysics ...)` or `joltphysics::joltphysics` - those names
 # do not exist and the find will silently fail.
 
-option(AYPHYSICS_BUILD_JOLT "Build JoltBackend3D (requires vcpkg Jolt port)" OFF)
-
-# Auto-enable when vcpkg Jolt is present and the user did not explicitly disable
-# the option. We probe by file existence rather than find_package so the cache
-# is not polluted for the subsequent real find_package call below.
-if(NOT AYPHYSICS_BUILD_JOLT)
-    set(_ayphys_jolt_probe_paths
-        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
-        "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include"
-    )
-    foreach(_p IN LISTS _ayphys_jolt_probe_paths)
-        if(EXISTS "${_p}/Jolt/Jolt.h")
-            set(AYPHYSICS_BUILD_JOLT ON CACHE BOOL "Build JoltBackend3D (requires vcpkg Jolt port)" FORCE)
-            message(STATUS "AYPhysics: auto-enabled Jolt backend (vcpkg Jolt detected at ${_p})")
-            break()
-        endif()
-    endforeach()
-endif()
+option(AYPHYSICS_BUILD_JOLT "Build JoltBackend3D (requires Jolt package)" ON)
 
 set(_ayphys_jolt_found FALSE)
 
 if(AYPHYSICS_BUILD_JOLT)
-    # Tier 1: vcpkg CMake config (target = Jolt::Jolt).
     find_package(Jolt CONFIG QUIET)
     if(Jolt_FOUND)
         set(_ayphys_jolt_found TRUE)
         set(AYPHYSICS_JOLT_TARGET "Jolt::Jolt")
         set(AYPHYSICS_JOLT_INCLUDE_DIR "")
         message(STATUS "AYPhysics: Jolt backend ENABLED via find_package(Jolt)")
-    else()
-        # Tier 2: header-only find_path fallback (mirrors AYAudio miniaudio).
-        find_path(_ayphys_jolt_header "Jolt/Jolt.h")
-        if(NOT _ayphys_jolt_header)
-            if(DEFINED ENV{VCPKG_ROOT})
-                set(_ayphys_jolt_inc "$ENV{VCPKG_ROOT}/installed/x64-windows/include")
-                if(EXISTS "${_ayphys_jolt_inc}/Jolt/Jolt.h")
-                    set(_ayphys_jolt_header "${_ayphys_jolt_inc}")
-                endif()
-            elseif(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include/Jolt/Jolt.h")
-                set(_ayphys_jolt_header "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include")
-            endif()
-        endif()
-        if(_ayphys_jolt_header)
-            find_library(JOLT_LIB NAMES Jolt)
-            if(JOLT_LIB)
-                set(_ayphys_jolt_found TRUE)
-                set(AYPHYSICS_JOLT_TARGET "${JOLT_LIB}")
-                set(AYPHYSICS_JOLT_INCLUDE_DIR "${_ayphys_jolt_header}")
-                message(STATUS "AYPhysics: Jolt backend ENABLED via find_path fallback (${JOLT_LIB})")
-            else()
-                message(WARNING "AYPhysics: Jolt/Jolt.h found but Jolt.lib missing - disabling Jolt backend")
-            endif()
-        endif()
     endif()
 
     if(_ayphys_jolt_found)
@@ -150,21 +101,7 @@ endif()
 # =============================================================================
 # Box2D integration (R2.5 real 2D impl)
 # =============================================================================
-option(AYPHYSICS_BUILD_BOX2D "Build Box2DBackend2D (requires vcpkg box2d port)" OFF)
-
-if(NOT AYPHYSICS_BUILD_BOX2D)
-    set(_ayphys_box2d_probe_paths
-        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
-        "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include"
-    )
-    foreach(_p IN LISTS _ayphys_box2d_probe_paths)
-        if(EXISTS "${_p}/box2d/box2d.h")
-            set(AYPHYSICS_BUILD_BOX2D ON CACHE BOOL "Build Box2DBackend2D (requires vcpkg box2d port)" FORCE)
-            message(STATUS "AYPhysics: auto-enabled Box2D backend (vcpkg Box2D detected at ${_p})")
-            break()
-        endif()
-    endforeach()
-endif()
+option(AYPHYSICS_BUILD_BOX2D "Build Box2DBackend2D (requires box2d package)" ON)
 
 set(_ayphys_box2d_found FALSE)
 
@@ -174,29 +111,6 @@ if(AYPHYSICS_BUILD_BOX2D)
         set(_ayphys_box2d_found TRUE)
         set(AYPHYSICS_BOX2D_TARGET "box2d::box2d")
         message(STATUS "AYPhysics: Box2D backend ENABLED via find_package(box2d)")
-    else()
-        find_path(_ayphys_box2d_header "box2d/box2d.h")
-        if(NOT _ayphys_box2d_header)
-            if(DEFINED ENV{VCPKG_ROOT})
-                set(_ayphys_box2d_inc "$ENV{VCPKG_ROOT}/installed/x64-windows/include")
-                if(EXISTS "${_ayphys_box2d_inc}/box2d/box2d.h")
-                    set(_ayphys_box2d_header "${_ayphys_box2d_inc}")
-                endif()
-            elseif(EXISTS "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include/box2d/box2d.h")
-                set(_ayphys_box2d_header "${CMAKE_SOURCE_DIR}/vcpkg/installed/x64-windows/include")
-            endif()
-        endif()
-        if(_ayphys_box2d_header)
-            find_library(BOX2D_LIB NAMES box2d)
-            if(BOX2D_LIB)
-                set(_ayphys_box2d_found TRUE)
-                set(AYPHYSICS_BOX2D_TARGET "${BOX2D_LIB}")
-                set(AYPHYSICS_BOX2D_INCLUDE_DIR "${_ayphys_box2d_header}")
-                message(STATUS "AYPhysics: Box2D backend ENABLED via find_path fallback (${BOX2D_LIB})")
-            else()
-                message(WARNING "AYPhysics: box2d/box2d.h found but box2d.lib missing - disabling Box2D backend")
-            endif()
-        endif()
     endif()
 
     if(_ayphys_box2d_found)
