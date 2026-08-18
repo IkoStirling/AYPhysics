@@ -12,10 +12,14 @@ PhysicsSubSystem* PhysicsSubSystem::s_instance = nullptr;
 PhysicsSubSystem::PhysicsSubSystem()
 {
     s_instance = this;
-    // design §11: priority 700; Real time so pause/timeScale does not stall physics.
+    // Physics owns the fixed simulation barrier. timeScale changes how many
+    // fixed steps are due, never the constant dt passed to a physics step.
     _loopDescriptor.name = "Physics";
     _loopDescriptor.basePriority = 700;
-    _loopDescriptor.timeType = ayt::game::SubSystemDescriptor::TimeType::Real;
+    _loopDescriptor.timeType = ayt::game::SubSystemDescriptor::TimeType::Scaled;
+    _loopDescriptor.phases = ayt::game::phaseBit(ayt::game::FramePhase::FixedPhysics);
+    _loopDescriptor.clock = ayt::game::ClockDomain::Game;
+    _loopDescriptor.phasePriority = 0;
 }
 
 PhysicsSubSystem::~PhysicsSubSystem()
