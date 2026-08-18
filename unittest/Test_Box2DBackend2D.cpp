@@ -73,6 +73,11 @@ TEST_SUITE(Box2DBackend2DTests)
         PhysFrameSnapshot snap{};
         backend.step(1.0f / 60.0f);
         backend.publishSnapshot(snap);
+        CHECK_INT_EQ(backend.lastSnapshotBodyVisitCount(), 1u);
+        if (!snap.transforms.empty()) {
+            CHECK_INT_EQ(static_cast<uint32_t>(snap.transforms.front().dimension),
+                         static_cast<uint32_t>(PhysicsDimension::TwoD));
+        }
         const float y0 = snap.transforms.empty()
             ? 10.0f : snap.transforms.front().position.y;
 
@@ -85,6 +90,35 @@ TEST_SUITE(Box2DBackend2DTests)
         const float yN = snap.transforms.empty()
             ? y0 : snap.transforms.front().position.y;
         CHECK(yN < y0 - 1.0f);
+        backend.stop();
+    }
+
+    TEST_CASE(Real_SnapshotVisitsOnlyLiveBodies) {
+        Box2DBackend2D backend;
+        PhysicsBackendDescriptor desc;
+        desc.maxBodies = 65536u;
+        CHECK(backend.init2D(desc));
+        CHECK(backend.start(backend.describe()));
+
+        RigidbodyDesc rb{};
+        rb.type = BodyType::Dynamic;
+        BodyHandle first = InvalidBodyHandle;
+        BodyHandle second = InvalidBodyHandle;
+        CHECK_INT_EQ(static_cast<uint32_t>(backend.execute_createRigidbodyForTest(rb, first)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        CHECK_INT_EQ(static_cast<uint32_t>(backend.execute_createRigidbodyForTest(rb, second)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+
+        PhysFrameSnapshot snap{};
+        backend.publishSnapshot(snap);
+        CHECK_INT_EQ(backend.lastSnapshotBodyVisitCount(), 2u);
+
+        CHECK_INT_EQ(static_cast<uint32_t>(backend.execute_destroyRigidbodyForTest(first)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        snap.transforms.clear();
+        backend.publishSnapshot(snap);
+        CHECK_INT_EQ(backend.lastSnapshotBodyVisitCount(), 1u);
+
         backend.stop();
     }
 

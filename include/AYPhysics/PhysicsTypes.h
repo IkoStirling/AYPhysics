@@ -166,12 +166,18 @@ struct RaycastHit {
 // Snapshot structures (§5.3 sparse active-body)
 // =============================================================================
 
+enum class PhysicsDimension : uint8_t {
+    ThreeD = 0,
+    TwoD = 1
+};
+
 struct BodyTransform {
     BodyHandle body = InvalidBodyHandle;
     ayt::math::FVector3    position{};
     ayt::math::FQuaternion rotation{};
     ayt::math::FVector3    linearVelocity{};
     ayt::math::FVector3    angularVelocity{};
+    PhysicsDimension dimension = PhysicsDimension::ThreeD;
     uint8_t     flags = 0;  // bit0 = wasSleepingThisFrame (optional diagnostic)
 };
 

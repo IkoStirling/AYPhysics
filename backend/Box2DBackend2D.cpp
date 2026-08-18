@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <mutex>
 #include <vector>
 
@@ -92,7 +93,11 @@ struct Box2DBackend2D::Impl {
     std::vector<PhysLayer>     bodyLayer;
     std::vector<PhysLayerMask> bodyCollideMask;
 
-    std::vector<uint32_t> alwaysSyncSet;
+    // Dense live-body list keeps snapshot/WakeAll/SleepAll proportional to
+    // actual bodies instead of the configured handle-space capacity.
+    std::vector<uint32_t> liveBodyIndices;
+    std::vector<uint32_t> liveBodyPosition;
+    std::vector<uint8_t>  alwaysSyncByIndex;
 
     mutable std::mutex           asyncQueryMu;
     std::vector<QueryResult>       asyncQueryQueue;
@@ -122,7 +127,10 @@ bool Box2DBackend2D::init2D(const PhysicsBackendDescriptor& desc) {
     _impl->jointIdByIndex.assign(maxBodies, B2_ZERO_INIT);
     _impl->bodyLayer.assign(maxBodies, 0u);
     _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
-    _impl->alwaysSyncSet.reserve(64);
+    _impl->liveBodyIndices.clear();
+    _impl->liveBodyIndices.reserve(std::min<uint32_t>(maxBodies, 1024u));
+    _impl->liveBodyPosition.assign(maxBodies, std::numeric_limits<uint32_t>::max());
+    _impl->alwaysSyncByIndex.assign(maxBodies, 0u);
 
     b2WorldDef worldDef = b2DefaultWorldDef();
     worldDef.gravity    = toB2Vec2(_gravity);
@@ -240,7 +248,8 @@ void Box2DBackend2D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
     if (!_impl || !b2World_IsValid(_impl->worldId)) return;
 
     const size_t baseTransformCount = outSnapshot.transforms.size();
-    outSnapshot.transforms.reserve(baseTransformCount + _impl->maxBodies / 4u);
+    outSnapshot.transforms.reserve(baseTransformCount + _impl->liveBodyIndices.size());
+    _lastSnapshotBodyVisitCount = 0;
 
     auto emitBody = [&](uint32_t idx) {
         if (idx == 0u || idx >= _impl->maxBodies) return;
@@ -249,9 +258,7 @@ void Box2DBackend2D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
         if (!b2Body_IsValid(id)) return;
 
         const bool awake = b2Body_IsAwake(id);
-        const bool always =
-            std::find(_impl->alwaysSyncSet.begin(), _impl->alwaysSyncSet.end(), idx) !=
-            _impl->alwaysSyncSet.end();
+        const bool always = _impl->alwaysSyncByIndex[idx] != 0u;
         if (!awake && !always) return;
 
         const BodyHandle h = makeHandle(idx, _impl->bodyGeneration[idx]);
@@ -267,11 +274,13 @@ void Box2DBackend2D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
         bt.linearVelocity =
             ayt::math::FVector3(lv.x, lv.y, 0.0f);
         bt.angularVelocity = ayt::math::FVector3(0.0f, 0.0f, av);
+        bt.dimension       = PhysicsDimension::TwoD;
         bt.flags           = awake ? 0u : 1u;
         outSnapshot.transforms.push_back(bt);
     };
 
-    for (uint32_t idx = 1u; idx < _impl->maxBodies; ++idx) {
+    for (uint32_t idx : _impl->liveBodyIndices) {
+        ++_lastSnapshotBodyVisitCount;
         emitBody(idx);
     }
 
@@ -333,7 +342,10 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         // A5: stash per-body filter so CreateCollider can build the right b2Filter.
         _impl->bodyLayer[idx]        = d.layer;
         _impl->bodyCollideMask[idx]  = d.collideMask;
-        if (d.alwaysSync) _impl->alwaysSyncSet.push_back(idx);
+        _impl->liveBodyPosition[idx] =
+            static_cast<uint32_t>(_impl->liveBodyIndices.size());
+        _impl->liveBodyIndices.push_back(idx);
+        _impl->alwaysSyncByIndex[idx] = d.alwaysSync ? 1u : 0u;
         return;
     }
 
@@ -352,9 +364,16 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         _impl->bodyIdByIndex[idx]  = B2_ZERO_INIT;
         _impl->bodyLayer[idx]       = 0u;
         _impl->bodyCollideMask[idx] = 0xFFFFFFFFu;
-        auto it = std::find(_impl->alwaysSyncSet.begin(),
-                            _impl->alwaysSyncSet.end(), idx);
-        if (it != _impl->alwaysSyncSet.end()) _impl->alwaysSyncSet.erase(it);
+        _impl->alwaysSyncByIndex[idx] = 0u;
+
+        const uint32_t livePosition = _impl->liveBodyPosition[idx];
+        if (livePosition < _impl->liveBodyIndices.size()) {
+            const uint32_t movedIndex = _impl->liveBodyIndices.back();
+            _impl->liveBodyIndices[livePosition] = movedIndex;
+            _impl->liveBodyPosition[movedIndex] = livePosition;
+            _impl->liveBodyIndices.pop_back();
+        }
+        _impl->liveBodyPosition[idx] = std::numeric_limits<uint32_t>::max();
         return;
     }
 
@@ -866,8 +885,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
     }
 
     case CT::WakeAll: {
-        for (uint32_t idx = 1u; idx < _impl->maxBodies; ++idx) {
-            if (_impl->bodyGeneration[idx] == 0u) continue;
+        for (uint32_t idx : _impl->liveBodyIndices) {
             const b2BodyId id = _impl->bodyIdByIndex[idx];
             if (b2Body_IsValid(id)) b2Body_SetAwake(id, true);
         }
@@ -875,8 +893,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
     }
 
     case CT::SleepAll: {
-        for (uint32_t idx = 1u; idx < _impl->maxBodies; ++idx) {
-            if (_impl->bodyGeneration[idx] == 0u) continue;
+        for (uint32_t idx : _impl->liveBodyIndices) {
             const b2BodyId id = _impl->bodyIdByIndex[idx];
             if (b2Body_IsValid(id)) b2Body_SetAwake(id, false);
         }

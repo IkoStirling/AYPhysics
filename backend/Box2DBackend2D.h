@@ -36,6 +36,9 @@ public:
     uint64_t notFoundCount()         const noexcept { return _notFoundCount; }
     uint64_t lockstepRefusedCount()  const noexcept { return _lockstepRefusedCount; }
     uint64_t collisionEventCount()   const noexcept { return _collisionEventCount; }
+    uint64_t lastSnapshotBodyVisitCount() const noexcept {
+        return _lastSnapshotBodyVisitCount;
+    }
 
     // Test seam: force the lockstep gate to short-circuit step() until reset.
     // Mirrors JoltBackend3D::forceLockstepActive for parity with §10.2.
@@ -56,6 +59,7 @@ private:
     uint64_t _notFoundCount         = 0;
     uint64_t _lockstepRefusedCount  = 0;
     uint64_t _collisionEventCount  = 0;
+    uint64_t _lastSnapshotBodyVisitCount = 0;
     bool     _initialized          = false;
     bool     _running              = false;
     bool     _lockstepForcedActive = false;  // test seam

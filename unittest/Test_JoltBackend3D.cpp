@@ -102,6 +102,10 @@ TEST_SUITE(JoltBackend3DTests)
         PhysFrameSnapshot snap{};
         backend.step(1.0f / 60.0f);
         backend.publishSnapshot(snap);
+        if (!snap.transforms.empty()) {
+            CHECK_INT_EQ(static_cast<uint32_t>(snap.transforms.front().dimension),
+                         static_cast<uint32_t>(PhysicsDimension::ThreeD));
+        }
         const float y0 = snap.transforms.empty()
             ? 10.0f : snap.transforms.front().position.y;
 

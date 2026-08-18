@@ -624,6 +624,7 @@ void JoltBackend3D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
                                              rot.GetZ(), rot.GetW());
         bt.linearVelocity  = ayt::math::FVector3(lv.GetX(), lv.GetY(), lv.GetZ());
         bt.angularVelocity = ayt::math::FVector3(av.GetX(), av.GetY(), av.GetZ());
+        bt.dimension = PhysicsDimension::ThreeD;
         outSnapshot.transforms.push_back(bt);
     };
 

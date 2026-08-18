@@ -395,6 +395,7 @@ struct BodyTransform {
     FQuaternion rotation{};
     FVector3    linearVelocity{};   // included when syncVelocities=true (descriptor)
     FVector3    angularVelocity{};
+    PhysicsDimension dimension = PhysicsDimension::ThreeD; // handle spaces are independent
     uint8_t     flags = 0;          // bit0 = wasSleepingThisFrame (optional diagnostic)
 };
 
