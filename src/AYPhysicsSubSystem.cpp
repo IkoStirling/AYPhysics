@@ -20,6 +20,8 @@ PhysicsSubSystem::PhysicsSubSystem()
     _loopDescriptor.phases = ayt::game::phaseBit(ayt::game::FramePhase::FixedPhysics);
     _loopDescriptor.clock = ayt::game::ClockDomain::Game;
     _loopDescriptor.phasePriority = 0;
+    _loopDescriptor.reads = {"Physics.Commands"};
+    _loopDescriptor.writes = {"Physics.Snapshot"};
 }
 
 PhysicsSubSystem::~PhysicsSubSystem()
