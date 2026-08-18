@@ -16,6 +16,7 @@
 
 #include "AYMath/MathTypes.h"
 #include "AYMath/MathGeometry.h"
+#include <AYTime/Duration.h>
 
 namespace ayt::physics {
 
@@ -248,6 +249,7 @@ struct PhysicsBackendDescriptor {
     uint32_t    tempAllocatorBytes      = 10u * 1024u * 1024u;
     float       fixedDeltaTime          = 1.0f / 60.0f;
     int         maxSubSteps             = 4;
+    ayt::time::Duration fixedStepTimeout = ayt::time::Duration::fromSeconds(1);
     bool        syncVelocitiesInSnapshot = true;
     ayt::math::FVector3 gravity3D{0.0f, -9.81f, 0.0f};
     ayt::math::FVector2 gravity2D{0.0f, -9.81f};

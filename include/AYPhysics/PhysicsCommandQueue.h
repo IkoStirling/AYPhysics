@@ -72,7 +72,10 @@ struct PhysicsCommand {
     uint32_t           layerMask  = 0xFFFFFFFFu;
 
     union {
-        struct { float deltaTime; } step;
+        struct {
+            float deltaTime;
+            uint64_t completionSequence;
+        } step;
         struct { float x, y, z, w; } vec4;            // force / impulse / halfExtents / etc.
         struct { float px, py, pz, qx, qy, qz, qw; } xform;
         struct { float ox, oy, oz, dx, dy, dz; } ray;

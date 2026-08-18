@@ -56,7 +56,9 @@ rb.position = FVector3(0, 10, 0);
 BodyHandle body = InvalidBodyHandle;
 world->createRigidbody(rb, body);
 
-manager->step(1.0f / 60.0f);
+// Fixed-phase path: returns only after both backends advanced and the new
+// snapshot was published. step() remains available for explicit async use.
+manager->stepAndWait(1.0f / 60.0f);
 
 const PhysFrameSnapshot& snap = manager->fetchResults();
 // iterate snap.transforms for matching handle (sparse list; Null mode: unchanged)
@@ -80,7 +82,7 @@ If `vcpkg jolt-physics` is installed, Jolt-backed test variant is built automati
 
 ---
 
-## Engine integration (planned)
+## Engine integration
 
 | Module | Relationship |
 |--------|--------------|
@@ -93,6 +95,11 @@ If `vcpkg jolt-physics` is installed, Jolt-backed test variant is built automati
 | **AYRenderer** | Optional: debug-draw line/shape submission |
 | **AYAnimation** | R7+: cloth / ragdoll / IK drives physics state |
 | **Jolt** | Optional: `vcpkg jolt-physics`; absent → Null mode |
+
+`PhysicsSubSystem` runs in `FixedPhysics` and uses `stepAndWait()`. The game
+thread therefore enters `FixedPostPhysics` only after the matching snapshot is
+published; a queue error, timeout, or shutdown fails the phase and the pending
+simulation tick is not committed.
 
 ---
 

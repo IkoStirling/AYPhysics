@@ -40,6 +40,8 @@ public:
     bool initialize() override;
     void update(float deltaTime) override;
     void fixedUpdate(float fixedDeltaTime) override;
+    bool tickChecked(ayt::game::FramePhase phase,
+                     const ayt::game::FrameContext& context) override;
     void shutdown() override;
 
     PhysicsManager* manager() { return _manager.get(); }
@@ -49,6 +51,8 @@ public:
     IPhysicsQuery* query() { return &_query; }
 
 private:
+    bool runFixedStep(float fixedDeltaTime);
+
     std::unique_ptr<PhysicsManager> _manager;
     PhysicsQueryAdapter _query;
     PhysicsBackendDescriptor _descriptor{};

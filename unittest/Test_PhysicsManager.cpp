@@ -96,6 +96,36 @@ TEST_SUITE(PhysicsManagerTests)
         mgr->shutdown();
     }
 
+    TEST_CASE(StepAndWaitPublishesCompletedSnapshot) {
+        PhysicsBackendDescriptor d;
+        d.kind3D = BackendKind::Mock;
+        auto mgr = PhysicsManager::create(d);
+        CHECK_NOT_NULL(mgr.get());
+
+        const float dt = 1.0f / 120.0f;
+        const PhysResult r = mgr->stepAndWait(
+            dt, ayt::time::Duration::fromSeconds(1));
+        CHECK_INT_EQ(static_cast<uint32_t>(r),
+                     static_cast<uint32_t>(PhysResult::Ok));
+
+        const PhysFrameSnapshot& snapshot = mgr->fetchResults();
+        CHECK_INT_EQ(static_cast<int>(snapshot.frameIndex), 1);
+        CHECK_FLOAT_EQ(snapshot.stepSeconds, dt, 0.00001f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(StepAndWaitRejectsStoppedManager) {
+        PhysicsBackendDescriptor d;
+        d.kind3D = BackendKind::Null;
+        auto mgr = PhysicsManager::create(d);
+        CHECK_NOT_NULL(mgr.get());
+        mgr->shutdown();
+
+        const PhysResult r = mgr->stepAndWait(1.0f / 60.0f);
+        CHECK_INT_EQ(static_cast<uint32_t>(r),
+                     static_cast<uint32_t>(PhysResult::InvalidState));
+    }
+
     // F-A regression — mintHandle caps index at descriptor().maxBodies. Before
     // the fix, the game-thread counter was unbounded; once it crossed the
     // backend's slot-table size, createRigidbody returned Ok with a handle

@@ -1,13 +1,18 @@
 #pragma once
 // AYPhysics/PhysicsManager.h - public manager entry (§9, §4.5)
 //
-// Construction-time backend selection (no runtime swap). step() is enqueue + return.
+// Construction-time backend selection (no runtime swap). step() is enqueue + return;
+// stepAndWait() is the fixed-phase completion barrier.
 // fetchResults() returns the latest sparse PhysFrameSnapshot for game-thread read.
 // shutdown() drains the queue, joins the physics thread.
 
 #include "AYPhysics/PhysicsTypes.h"
 #include "AYPhysics/PhysicsCommandQueue.h"
+#include <AYPlatform/ConditionVariable.h>
+#include <AYPlatform/Mutex.h>
+#include <AYTime/Duration.h>
 
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -34,6 +39,11 @@ public:
 
     // Enqueue step; returns immediately. deltaTime clamped by backend.
     PhysResult step(float deltaTime);
+
+    // Enqueue one step and wait until both backends have advanced and the
+    // resulting snapshot has been published. Intended for FixedPhysics.
+    PhysResult stepAndWait(float deltaTime);
+    PhysResult stepAndWait(float deltaTime, ayt::time::Duration timeout);
 
     // Game-thread read of the latest sparse snapshot. Reference valid until next call.
     const PhysFrameSnapshot& fetchResults();
@@ -77,6 +87,10 @@ private:
 
     std::atomic<bool> _running{false};
     std::atomic<uint64_t> _frameIndex{0};
+    std::atomic<uint64_t> _nextStepCompletionSequence{1};
+    std::atomic<uint64_t> _completedStepSequence{0};
+    ayt::platform::Mutex _stepCompletionMutex;
+    ayt::platform::ConditionVariable _stepCompletionCv;
 
     // Overflow telemetry (§5.4 / §17.1).
     std::atomic<uint64_t> _queueHighWater{0};

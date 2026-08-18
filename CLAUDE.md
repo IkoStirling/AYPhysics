@@ -42,6 +42,7 @@
 - **Physics → Game**：双缓冲 **稀疏** `PhysFrameSnapshot`（仅 Awake ∪ AlwaysSync；禁止按 handle 稠密下标）
 - **查询双路径**：`*Async`（下帧 snapshot）+ `*Sync`（mailbox 同帧阻塞）；禁止 game thread 碰 `JPH::*`
 - **Drain / 反压**：`maxDrainPerTick` 默认 4096；满队列返回 `QueueFull`，创建路径禁止静默丢弃
+- **固定阶段屏障**：`PhysicsSubSystem` 必须调用 `stepAndWait(Duration)`；只有对应 snapshot 发布后才能进入 `FixedPostPhysics`。`step()` 仅用于明确的异步调用。
 - Jolt 仅 `backend/JoltBackend3D.cpp`；**公开头禁止** `#include <Jolt/Jolt.h>`
 - **R1.5 合并门禁**：design.md §17.8 checklist 必须在 PR 勾选；未达标不得合入真 Jolt 后端
 

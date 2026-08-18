@@ -21,6 +21,8 @@
 
 #include "AYPlatform/Thread.h"
 
+#include <mutex>
+
 namespace ayt::physics {
 
 namespace {
@@ -160,11 +162,46 @@ PhysResult PhysicsManager::step(float deltaTime) {
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::Step;
     cmd.u.step.deltaTime = deltaTime;
+    cmd.u.step.completionSequence = 0;
     if (!_queue->tryPush(cmd)) {
         _queueRejectCount.fetch_add(1, std::memory_order_relaxed);
         return PhysResult::QueueFull;
     }
     return PhysResult::Ok;
+}
+
+PhysResult PhysicsManager::stepAndWait(float deltaTime) {
+    return stepAndWait(deltaTime, _descriptor.fixedStepTimeout);
+}
+
+PhysResult PhysicsManager::stepAndWait(float deltaTime,
+                                       ayt::time::Duration timeout) {
+    if (!_running.load(std::memory_order_acquire)) return PhysResult::InvalidState;
+
+    const uint64_t sequence =
+        _nextStepCompletionSequence.fetch_add(1, std::memory_order_relaxed);
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::Step;
+    cmd.u.step.deltaTime = deltaTime;
+    cmd.u.step.completionSequence = sequence;
+    if (!_queue->tryPush(cmd)) {
+        _queueRejectCount.fetch_add(1, std::memory_order_relaxed);
+        return PhysResult::QueueFull;
+    }
+
+    std::unique_lock<ayt::platform::Mutex> lock(_stepCompletionMutex);
+    const bool completed = _stepCompletionCv.waitFor(
+        lock,
+        timeout.toChronoMicroseconds(),
+        [this, sequence]() {
+            return _completedStepSequence.load(std::memory_order_acquire) >= sequence
+                || !_running.load(std::memory_order_acquire);
+        });
+
+    if (!completed) return PhysResult::BackendError;
+    return _completedStepSequence.load(std::memory_order_acquire) >= sequence
+        ? PhysResult::Ok
+        : PhysResult::InvalidState;
 }
 
 const PhysFrameSnapshot& PhysicsManager::fetchResults() {
@@ -188,6 +225,7 @@ void PhysicsManager::publishSnapshot() {
 
 void PhysicsManager::shutdown() {
     if (!_running.exchange(false, std::memory_order_acq_rel)) return;
+    _stepCompletionCv.notifyAll();
     if (_physicsThread.joinable()) _physicsThread.join();
     if (_backend3D) _backend3D->stop();
     if (_backend2D) _backend2D->stop();
@@ -209,12 +247,14 @@ void PhysicsManager::_physicsThreadMain() {
         // For R1 we simply drain up to maxDrainPerTick then step.
         uint32_t drained = 0;
         bool sawStep = false;
+        uint64_t completionSequence = 0;
         PhysicsCommand cmd{};
         while (drained < _descriptor.maxDrainPerTick &&
                _queue->tryPop(cmd)) {
             if (cmd.type == PhysicsCommandType::Step) {
                 sawStep = true;
                 lastDt = cmd.u.step.deltaTime;
+                completionSequence = cmd.u.step.completionSequence;
                 break;
             }
             // Non-step command: take create payload if relevant, then execute.
@@ -264,6 +304,11 @@ void PhysicsManager::_physicsThreadMain() {
             if (_backend3D) _backend3D->publishSnapshot(back);
             if (_backend2D) _backend2D->publishSnapshot(back);
             publishSnapshot();
+            if (completionSequence != 0) {
+                _completedStepSequence.store(completionSequence,
+                                             std::memory_order_release);
+                _stepCompletionCv.notifyAll();
+            }
         }
 
         if (drained == 0 && drained2D == 0 && !sawStep) {

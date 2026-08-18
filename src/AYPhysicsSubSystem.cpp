@@ -4,6 +4,7 @@
 #include "AYPhysics/PhysicsManager.h"
 
 #include <AYGameLoop.h>
+#include <AYLog.h>
 
 namespace ayt::physics {
 
@@ -83,14 +84,37 @@ void PhysicsSubSystem::update(float /*deltaTime*/)
 
 void PhysicsSubSystem::fixedUpdate(float fixedDeltaTime)
 {
-    if (!_manager) {
-        return;
+    (void)runFixedStep(fixedDeltaTime);
+}
+
+bool PhysicsSubSystem::tickChecked(ayt::game::FramePhase phase,
+                                   const ayt::game::FrameContext& context)
+{
+    if (phase == ayt::game::FramePhase::FixedPhysics) {
+        return runFixedStep(context.fixedDeltaTime);
     }
-    (void)_manager->step(fixedDeltaTime);
+    tick(phase, context);
+    return true;
+}
+
+bool PhysicsSubSystem::runFixedStep(float fixedDeltaTime)
+{
+    if (!_manager) return false;
+
+    const PhysResult result = _manager->stepAndWait(
+        fixedDeltaTime,
+        _descriptor.fixedStepTimeout);
+    if (result != PhysResult::Ok) {
+        ayt::log::error("[Physics] Fixed step completion failed: %s",
+                        toString(result));
+        return false;
+    }
+
     // E-3: fan out snapshot collisions on the game thread (not from
     // ContactListener / physics-thread publishSnapshot).
     const PhysFrameSnapshot& snap = _manager->fetchResults();
     (void)publishCollisionEventsToBus(snap);
+    return true;
 }
 
 } // namespace ayt::physics

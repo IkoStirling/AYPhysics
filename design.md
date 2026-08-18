@@ -152,7 +152,7 @@ Following the AYUI §3 R-*/C-*/U-* lane convention: `B-*` = backend, `E-*` = eng
 
 | Step | Scope | Exit criteria |
 |------|-------|---------------|
-| **E-1** | `PhysicsSubSystem : ayt::game::ISubSystem` registered in GameLoop | Loop pump calls `step(dt)` |
+| **E-1** | `PhysicsSubSystem : ayt::game::ISubSystem` registered in GameLoop | `FixedPhysics` calls `stepAndWait(dt, Duration)`; snapshot publish completes before `FixedPostPhysics`; failure does not commit sim tick |
 | **E-2** | `RigidbodyComponent` / `ColliderComponent` in AYEntity | Entity drives physics state |
 | **E-3** | `PhysicsEventBridge` → `AYEventSystem` typed events (collision enter/stay/exit) | ✅ Events delivered on main thread (`fixedUpdate` after `fetchResults`) |
 
