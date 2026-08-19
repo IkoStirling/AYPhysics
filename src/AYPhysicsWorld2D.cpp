@@ -342,6 +342,31 @@ PhysResult PhysicsWorld2D::setGravityScale(BodyHandle h, float scale) {
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld2D::setMass(BodyHandle h, float mass) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h) || !(mass > 0.0f)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetMass;
+    cmd.body = h;
+    cmd.u.vec4.x = mass;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld2D::setMaterial(ColliderHandle h, float friction, float restitution) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetMaterial;
+    cmd.collider = h;
+    cmd.u.vec4.x = friction;
+    cmd.u.vec4.y = restitution;
+    if (!m->commandQueue2D()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
 void PhysicsWorld2D::wakeAll() {
     PhysicsManager* m = _manager;
     if (!m) return;

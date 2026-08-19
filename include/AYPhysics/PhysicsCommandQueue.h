@@ -48,6 +48,9 @@ enum class PhysicsCommandType : uint8_t {
     SetGravityScale       = 18,  // R6: per-body gravity multiplier (b2Body_SetGravityScale)
     ApplyTorque           = 19,  // R6: Z-axis torque (b2Body_ApplyTorque)
     ApplyAngularImpulse   = 20,  // R6: Z-axis angular impulse (b2Body_ApplyAngularImpulse)
+    SetMass               = 21,  // R10: runtime mass override (vec4.x = mass)
+    SetMaterial           = 22,  // R10: runtime friction/restitution override
+                                  //      (vec4.x = friction, vec4.y = restitution; collider-scoped)
 };
 
 using CreateSlotId = uint32_t;

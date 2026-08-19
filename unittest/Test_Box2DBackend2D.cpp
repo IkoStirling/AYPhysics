@@ -899,6 +899,106 @@ TEST_SUITE(Box2DBackend2DTests)
         mgr->shutdown();
     }
 
+    TEST_CASE(Real_SetMassChangesAccelerationUnderForce) {
+        // R10: same force, mass 4 vs 1 — 4x the acceleration after the set.
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.linearDamping = 0.0f;
+        rb.mass = 4.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Sphere; cd.radius = 0.5f;
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+
+        for (int i = 0; i < 30; ++i) {
+            w->applyForce(h, ayt::math::FVector3(2.0f, 0.0f, 0.0f));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain2D(*mgr, 200);
+        float vLow = 0.0f;
+        {
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == h) vLow = bt.linearVelocity.x;
+        }
+        CHECK(vLow > 0.2f);   // mass 4, F=2 -> a=0.5, v(0.5s)=0.25
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, 1.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        for (int i = 0; i < 30; ++i) {
+            w->applyForce(h, ayt::math::FVector3(2.0f, 0.0f, 0.0f));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain2D(*mgr, 200);
+        float vAfter = vLow;
+        {
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == h) vAfter = bt.linearVelocity.x;
+        }
+        // Same 30-step force window: delta after the set (a=2) must be > 3x
+        // the pre-set delta (a=0.5).
+        CHECK((vAfter - vLow) > 3.0f * vLow);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMaterialChangesSliding) {
+        // R10: friction swap before first contact. Box2D mixes shape friction
+        // when the contact is created — a swap after the contact exists does
+        // not re-evaluate it (same contact-cache semantics as Jolt). The
+        // friction-1.0 slider must brake hard; the friction-0.5 control slides
+        // further.
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb; rb.type = BodyType::Static;
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        auto makeSlider = [&](float x, BodyHandle& outH, ColliderHandle& outC) {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.linearDamping = 0.0f;
+            rb.position = ayt::math::FVector3(x, 0.8f, 0.0f);  // airborne start
+            w->createRigidbody(rb, outH);
+            ColliderDesc cd{};
+            cd.body = outH; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(0.25f, 0.25f, 0.0f);
+            w->createCollider(cd, outC);
+        };
+        BodyHandle hHi = InvalidBodyHandle, hLo = InvalidBodyHandle;
+        ColliderHandle cHi, cLo;
+        makeSlider(0.0f, hHi, cHi);
+        makeSlider(1.5f, hLo, cLo);  // 1.0 m gap: sliders must not touch
+        // Swap before the first step: the landing contact must be born with
+        // friction 1.0. 10 steps settle both sliders onto the floor.
+        w->setMaterial(cHi, 1.0f, 0.0f);
+        for (int i = 0; i < 10; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+        w->setRigidbodyVelocity(hHi, ayt::math::FVector3(5.0f, 0.0f, 0.0f));
+        w->setRigidbodyVelocity(hLo, ayt::math::FVector3(5.0f, 0.0f, 0.0f));
+        for (int i = 0; i < 60; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float xHi = 0.0f, xLo = 0.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == hHi) xHi = bt.position.x;
+            if (bt.body == hLo) xLo = bt.position.x;
+        }
+        CHECK(xHi < xLo - 0.5f);  // high-friction slider braked hard
+        mgr->shutdown();
+    }
+
 #else
 
     TEST_CASE(Stub_ManagerFallsBackToNullWhenNoBox2D) {
@@ -907,6 +1007,50 @@ TEST_SUITE(Box2DBackend2DTests)
         auto mgr = PhysicsManager::create(desc);
         CHECK_NOT_NULL(mgr.get());
         CHECK(!mgr->backend2D()->isRealDevice());
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ColliderOffsetShiftsRestPose) {
+        // R10: local shape offset shifts geometry relative to the body
+        // origin. A 0.25 m upward-offset circle rests with the body origin
+        // 0.25 m above the floor (a centered circle rests at 0.5 m).
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        BodyHandle h = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.alwaysSync = true;
+            rb.position = ayt::math::FVector3(0.0f, 2.0f, 0.0f);
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Sphere;
+            cd.radius = 0.5f;
+            cd.offset = ayt::math::FVector3(0.0f, 0.25f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        for (int i = 0; i < 120; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain2D(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float y = 2.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == h) y = bt.position.y;
+        }
+        // Circle bottom = y + 0.25 - 0.5 = 0.5 (floor top) -> rests at
+        // y = 0.75 (a centered circle rests at y = 1.0).
+        CHECK(y > 0.65f);
+        CHECK(y < 0.85f);
         mgr->shutdown();
     }
 

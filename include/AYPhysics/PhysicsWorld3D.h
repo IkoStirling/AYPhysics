@@ -28,6 +28,16 @@ public:
     // LayerMaskGroupFilter then re-evaluates contacts on the next step.
     PhysResult    setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask);
 
+    // R10: 2D-symmetric runtime setters (Jolt backend; wakes the body).
+    PhysResult    setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v);
+    PhysResult    setGravityScale(BodyHandle h, float scale);           // 0 = float, 1 = world default
+    PhysResult    applyTorque(BodyHandle h, const ayt::math::FVector3& torque);
+    PhysResult    applyAngularImpulse(BodyHandle h, const ayt::math::FVector3& impulse);
+    PhysResult    setMass(BodyHandle h, float mass);                    // must be > 0
+    // Jolt keeps friction/restitution per body (not per shape): the collider
+    // handle resolves to its owning body and sets it there.
+    PhysResult    setMaterial(ColliderHandle h, float friction, float restitution);
+
     PhysResult    createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult    destroyCollider(ColliderHandle h);
 

@@ -57,6 +57,10 @@ public:
     PhysResult setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v);
     // R6: runtime per-body gravity multiplier (0 = float, 1 = world default).
     PhysResult setGravityScale(BodyHandle h, float scale);
+    // R10: runtime mass override (must be > 0; wakes the body).
+    PhysResult setMass(BodyHandle h, float mass);
+    // R10: runtime per-collider friction / restitution override.
+    PhysResult setMaterial(ColliderHandle h, float friction, float restitution);
 
     void wakeAll();
     void sleepAll();

@@ -86,6 +86,11 @@ struct Box2DBackend2D::Impl {
     std::vector<uint16_t>  bodyGeneration;
     std::vector<uint16_t>  colliderGeneration;
     std::vector<b2ShapeId> shapeIdByIndex;
+    // R10: creation-time mass override (RigidbodyDesc.mass). Box2D computes
+    // body mass from shape density at collider attach, so the override is
+    // applied there via GetMassData->SetMassData (keeps the shape-computed
+    // inertia, swaps mass). 0 = no override.
+    std::vector<float>     bodyMassOverride;
     std::vector<uint16_t>  jointGeneration;
     std::vector<b2JointId> jointIdByIndex;
 
@@ -123,6 +128,7 @@ bool Box2DBackend2D::init2D(const PhysicsBackendDescriptor& desc) {
     _impl->bodyGeneration.assign(maxBodies, 0u);
     _impl->colliderGeneration.assign(maxBodies, 0u);
     _impl->shapeIdByIndex.assign(maxBodies, B2_ZERO_INIT);
+    _impl->bodyMassOverride.assign(maxBodies, 0.0f);
     _impl->jointGeneration.assign(maxBodies, 0u);
     _impl->jointIdByIndex.assign(maxBodies, B2_ZERO_INIT);
     _impl->bodyLayer.assign(maxBodies, 0u);
@@ -346,6 +352,12 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             static_cast<uint32_t>(_impl->liveBodyIndices.size());
         _impl->liveBodyIndices.push_back(idx);
         _impl->alwaysSyncByIndex[idx] = d.alwaysSync ? 1u : 0u;
+        // R10: creation-time mass override — applied at first collider attach
+        // (see CreateCollider). Dynamic only: b2Body_SetMassData mutates
+        // mass/inertia on any body type, which corrupts kinematic bodies
+        // (Box2D owns their mass state; overriding it breaks sensors).
+        _impl->bodyMassOverride[idx] =
+            d.type == BodyType::Dynamic ? d.mass : 0.0f;
         return;
     }
 
@@ -489,6 +501,46 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         return;
     }
 
+    case CT::SetMass: {
+        // R10: runtime mass override. Keeps the computed center + rotational
+        // inertia, swaps only the mass; wakes the body so the change applies
+        // immediately.
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        if (!(cmd.u.vec4.x > 0.0f)) { ++_notFoundCount; return; }
+        const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
+        // b2Body_SetMassData writes mass/inertia on any body type; kinematic
+        // and static bodies have no meaningful mass (Box2D owns it) — dynamic
+        // only, matching the creation-path override.
+        if (b2Body_GetType(bodyId) != b2_dynamicBody) { ++_notFoundCount; return; }
+        b2MassData md = b2Body_GetMassData(bodyId);
+        md.mass = cmd.u.vec4.x;
+        b2Body_SetMassData(bodyId, md);
+        b2Body_SetAwake(bodyId, true);
+        return;
+    }
+
+    case CT::SetMaterial: {
+        // R10: runtime per-collider friction / restitution (Box2D keeps these
+        // on the shape).
+        const uint32_t idx = handleIndex(cmd.collider);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->colliderGeneration[idx] != handleGeneration(cmd.collider)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2ShapeId shapeId = _impl->shapeIdByIndex[idx];
+        if (!b2Shape_IsValid(shapeId)) { ++_notFoundCount; return; }
+        b2Shape_SetFriction(shapeId, cmd.u.vec4.x);
+        b2Shape_SetRestitution(shapeId, cmd.u.vec4.y);
+        return;
+    }
+
     case CT::ApplyImpulse: {
         const uint32_t idx = handleIndex(cmd.body);
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
@@ -529,17 +581,19 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         shapeDef.enableContactEvents    = true;
         shapeDef.enableSensorEvents      = true;  // A2: surface sensor events on all shapes
 
+        // R10: local-space shape offset (x/y; z ignored in 2D).
+        const b2Vec2 offset2D{d.offset.x, d.offset.y};
         b2ShapeId shapeId = B2_ZERO_INIT;
         switch (d.shape) {
         case ColliderShape::Box: {
             const b2Polygon poly =
-                b2MakeBox(d.halfExtents.x, d.halfExtents.y);
+                b2MakeOffsetBox(d.halfExtents.x, d.halfExtents.y, offset2D, b2Rot{1.0f, 0.0f});
             shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &poly);
             break;
         }
         case ColliderShape::Sphere: {
             b2Circle circle{};
-            circle.center = b2Vec2{0.0f, 0.0f};
+            circle.center = offset2D;
             circle.radius = d.radius;
             shapeId       = b2CreateCircleShape(bodyId, &shapeDef, &circle);
             break;
@@ -547,8 +601,8 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         case ColliderShape::Capsule: {
             const float halfHeight = std::max(0.0f, d.height * 0.5f - d.radius);
             b2Capsule capsule{};
-            capsule.center1 = b2Vec2{0.0f, -halfHeight};
-            capsule.center2 = b2Vec2{0.0f, halfHeight};
+            capsule.center1 = b2Add(offset2D, b2Vec2{0.0f, -halfHeight});
+            capsule.center2 = b2Add(offset2D, b2Vec2{0.0f, halfHeight});
             capsule.radius  = d.radius;
             shapeId         = b2CreateCapsuleShape(bodyId, &shapeDef, &capsule);
             break;
@@ -576,7 +630,8 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
                 ++_notFoundCount;
                 return;
             }
-            const b2Polygon poly = b2MakePolygon(&hull, 0.0f);
+            const b2Polygon poly =
+                b2MakeOffsetPolygon(&hull, offset2D, b2Rot{1.0f, 0.0f});
             shapeId = b2CreatePolygonShape(bodyId, &shapeDef, &poly);
             break;
         }
@@ -591,6 +646,16 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         }
         _impl->shapeIdByIndex[idx]      = shapeId;
         _impl->colliderGeneration[idx]  = static_cast<uint16_t>(handleGeneration(cmd.collider));
+
+        // R10: apply the body's creation-time mass override now that the shape
+        // has computed density-based mass/inertia. Box2D's SetMassData swaps
+        // mass and keeps the given inertia — read the shape-derived inertia
+        // back and re-apply it under the override mass.
+        if (_impl->bodyMassOverride[bodyIdx] > 0.0f) {
+            b2MassData md = b2Body_GetMassData(bodyId);
+            md.mass = _impl->bodyMassOverride[bodyIdx];
+            b2Body_SetMassData(bodyId, md);
+        }
         return;
     }
 

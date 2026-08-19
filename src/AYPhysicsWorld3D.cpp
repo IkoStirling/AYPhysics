@@ -155,6 +155,83 @@ PhysResult PhysicsWorld3D::setRigidbodyCollideMask(BodyHandle h, PhysLayerMask n
 }
 
 // =========================================================================
+// R10: 2D-symmetric runtime setters
+// =========================================================================
+
+PhysResult PhysicsWorld3D::setRigidbodyVelocity(BodyHandle h, const ayt::math::FVector3& v) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetRigidbodyVelocity;
+    cmd.body = h;
+    cmd.u.vec4.x = v.x; cmd.u.vec4.y = v.y; cmd.u.vec4.z = v.z;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld3D::setGravityScale(BodyHandle h, float scale) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetGravityScale;
+    cmd.body = h;
+    cmd.u.vec4.x = scale;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld3D::applyTorque(BodyHandle h, const ayt::math::FVector3& torque) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::ApplyTorque;
+    cmd.body = h;
+    cmd.u.vec4.x = torque.x; cmd.u.vec4.y = torque.y; cmd.u.vec4.z = torque.z;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld3D::applyAngularImpulse(BodyHandle h, const ayt::math::FVector3& impulse) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::ApplyAngularImpulse;
+    cmd.body = h;
+    cmd.u.vec4.x = impulse.x; cmd.u.vec4.y = impulse.y; cmd.u.vec4.z = impulse.z;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld3D::setMass(BodyHandle h, float mass) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h) || !(mass > 0.0f)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetMass;
+    cmd.body = h;
+    cmd.u.vec4.x = mass;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+PhysResult PhysicsWorld3D::setMaterial(ColliderHandle h, float friction, float restitution) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetMaterial;
+    cmd.collider = h;
+    cmd.u.vec4.x = friction;
+    cmd.u.vec4.y = restitution;
+    if (!m->commandQueue()->tryPush(cmd)) return PhysResult::QueueFull;
+    return PhysResult::Ok;
+}
+
+// =========================================================================
 // Collider
 // =========================================================================
 

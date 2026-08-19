@@ -583,6 +583,312 @@ TEST_SUITE(JoltBackend3DTests)
         CHECK(y < 0.0f);  // fell through — mask=0 ignored the floor
         mgr->shutdown();
     }
+
+    TEST_CASE(Real_SetGravityScaleZeroFloats) {
+        // R10: 3D-symmetric gravity-scale toggle. gravityScale=0 must float;
+        // the control body (scale=1) falls.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+
+        BodyHandle hFloat = InvalidBodyHandle;
+        BodyHandle hFall  = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.gravityScale = 0.0f;
+        rb.position = ayt::math::FVector3(0.0f, 5.0f, 0.0f);
+        w->createRigidbody(rb, hFloat);
+        ColliderDesc cd{};
+        cd.body = hFloat; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+        rb.gravityScale = 1.0f;
+        rb.position = ayt::math::FVector3(1.0f, 5.0f, 0.0f);
+        w->createRigidbody(rb, hFall);
+        cd.body = hFall;
+        w->createCollider(cd, c);
+
+        for (int i = 0; i < 90; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float yFloat = 5.0f, yFall = 5.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == hFloat) yFloat = bt.position.y;
+            if (bt.body == hFall)  yFall  = bt.position.y;
+        }
+        CHECK(yFloat > 4.0f);  // floated in place
+        CHECK(yFall < 2.0f);   // fell ~4.9 m in 90 steps
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ApplyTorqueSpinsBody) {
+        // R10: 3D torque vector — continuous Z torque must spin the box.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.angularDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+
+        for (int i = 0; i < 90; ++i) {
+            w->applyTorque(h, ayt::math::FVector3(0.0f, 0.0f, 8.0f));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float angle = 0.0f;
+        for (const BodyTransform& bt : snap.transforms)
+            if (bt.body == h) angle = bt.rotation.toEulerAngles().z;
+        CHECK(std::fabs(angle) > 0.5f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ApplyAngularImpulseSpinsBody) {
+        // R10: single 3D angular impulse kick — |omega_z| > 0.1 right after.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.angularDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+
+        w->applyAngularImpulse(h, ayt::math::FVector3(0.0f, 0.0f, 3.0f));
+        mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float wz = 0.0f;
+        for (const BodyTransform& bt : snap.transforms)
+            if (bt.body == h) wz = bt.angularVelocity.z;
+        CHECK(std::fabs(wz) > 0.1f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetRigidbodyVelocityMovesBody) {
+        // R10: direct velocity set beats damping — body drifts at 2 m/s.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.linearDamping = 0.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+        for (int i = 0; i < 10; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setRigidbodyVelocity(
+            h, ayt::math::FVector3(2.0f, 0.0f, 0.0f))),
+            static_cast<uint32_t>(PhysResult::Ok));
+        for (int i = 0; i < 30; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float x = 0.0f, vx = 0.0f;
+        for (const BodyTransform& bt : snap.transforms)
+            if (bt.body == h) { x = bt.position.x; vx = bt.linearVelocity.x; }
+        CHECK(x > 0.5f);      // drifted ~1 m
+        CHECK(vx > 1.5f);     // velocity held (no damping)
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMassChangesAccelerationUnderForce) {
+        // R10: same force, mass 4 vs 1 — 4x the acceleration after the set.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        rb.alwaysSync  = true;
+        rb.linearDamping = 0.0f;
+        rb.mass = 4.0f;
+        w->createRigidbody(rb, h);
+        ColliderDesc cd{};
+        cd.body = h; cd.shape = ColliderShape::Box;
+        cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+        ColliderHandle c; w->createCollider(cd, c); (void)c;
+
+        for (int i = 0; i < 30; ++i) {
+            w->applyForce(h, ayt::math::FVector3(2.0f, 0.0f, 0.0f));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain(*mgr, 200);
+        float vLow = 0.0f;
+        {
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == h) vLow = bt.linearVelocity.x;
+        }
+        CHECK(vLow > 0.2f);   // mass 4, F=2 -> a=0.5, v(0.5s)=0.25
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, 1.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        for (int i = 0; i < 30; ++i) {
+            w->applyForce(h, ayt::math::FVector3(2.0f, 0.0f, 0.0f));
+            mgr->step(1.0f / 60.0f);
+        }
+        waitForDrain(*mgr, 200);
+        float vAfter = vLow;
+        {
+            const PhysFrameSnapshot snap = mgr->fetchResults();
+            for (const BodyTransform& bt : snap.transforms)
+                if (bt.body == h) vAfter = bt.linearVelocity.x;
+        }
+        // Same 30-step force window: delta after the set (a=2) must be > 3x
+        // the pre-set delta (a=0.5).
+        CHECK((vAfter - vLow) > 3.0f * vLow);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMaterialChangesBounce) {
+        // R10: restitution swap before first contact. Jolt caches friction /
+        // restitution in contact constraints until they are re-evaluated, so
+        // a mid-contact set does not apply to an existing contact — the new
+        // value must land before the first impact. The 0.9-restitution ball
+        // must bounce back up; the 0.0 control rests on the floor.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 10.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        auto makeBall = [&](float x, BodyHandle& outH, ColliderHandle& outC) {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.linearDamping = 0.0f;
+            rb.alwaysSync  = true;  // stays in the snapshot once asleep
+            rb.position = ayt::math::FVector3(x, 6.0f, 0.0f);
+            w->createRigidbody(rb, outH);
+            ColliderDesc cd{};
+            cd.body = outH; cd.shape = ColliderShape::Sphere;
+            cd.radius = 0.5f;
+            w->createCollider(cd, outC);
+        };
+        BodyHandle hHi = InvalidBodyHandle, hLo = InvalidBodyHandle;
+        ColliderHandle cHi, cLo;
+        makeBall(0.0f, hHi, cHi);
+        makeBall(2.0f, hLo, cLo);  // keep >1.0 m away: the bouncing ball must
+                                   // not collide with the control ball
+        // Both balls airborne (first impact ~64 steps). Swap restitution now.
+        for (int i = 0; i < 5; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMaterial(cHi, 0.0f, 0.9f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        // Impact ~step 64, bounce apex ~step 121 — sample well past it.
+        for (int i = 0; i < 130; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float yHi = 6.0f, yLo = 6.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == hHi) yHi = bt.position.y;
+            if (bt.body == hLo) yLo = bt.position.y;
+        }
+        CHECK(yHi > 2.0f);  // 0.9 restitution -> bounce apex ~4.9 m
+        CHECK(yLo < 1.5f);  // control: rests on floor (ball center y = 1.0)
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_RuntimeSettersRejectInvalidParams) {
+        // R10: API-layer validation — bad handles / non-positive mass.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.collideMask = 0u;
+        w->createRigidbody(rb, h);
+
+        CHECK_INT_EQ(static_cast<int>(w->setMass(InvalidBodyHandle, 2.0f)),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->setMass(h, 0.0f)),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->setMass(h, -1.0f)),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->setRigidbodyVelocity(InvalidBodyHandle,
+                     ayt::math::FVector3(1.0f, 0.0f, 0.0f))),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->setGravityScale(InvalidBodyHandle, 0.0f)),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->applyTorque(InvalidBodyHandle,
+                     ayt::math::FVector3(0.0f, 0.0f, 1.0f))),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->applyAngularImpulse(InvalidBodyHandle,
+                     ayt::math::FVector3(0.0f, 0.0f, 1.0f))),
+                     static_cast<int>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<int>(w->setMaterial(InvalidColliderHandle, 0.5f, 0.1f)),
+                     static_cast<int>(PhysResult::InvalidParam));
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_ColliderOffsetShiftsRestPose) {
+        // R10: local shape offset shifts geometry relative to the body
+        // origin. A 0.25 m upward-offset box rests with the body origin
+        // 0.25 m above the floor (a centered box rests at 0.5 m).
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+
+        BodyHandle floor = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Static;
+            w->createRigidbody(rb, floor);
+            ColliderDesc cd{};
+            cd.body = floor; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(10.0f, 0.5f, 10.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        BodyHandle h = InvalidBodyHandle;
+        {
+            RigidbodyDesc rb;
+            rb.type = BodyType::Dynamic;
+            rb.alwaysSync = true;
+            rb.position = ayt::math::FVector3(0.0f, 2.0f, 0.0f);
+            w->createRigidbody(rb, h);
+            ColliderDesc cd{};
+            cd.body = h; cd.shape = ColliderShape::Box;
+            cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.5f);
+            cd.offset = ayt::math::FVector3(0.0f, 0.25f, 0.0f);
+            ColliderHandle c; w->createCollider(cd, c); (void)c;
+        }
+        for (int i = 0; i < 120; ++i) mgr->step(1.0f / 60.0f);
+        waitForDrain(*mgr, 200);
+        const PhysFrameSnapshot snap = mgr->fetchResults();
+        float y = 2.0f;
+        for (const BodyTransform& bt : snap.transforms) {
+            if (bt.body == h) y = bt.position.y;
+        }
+        // Box bottom = y + 0.25 - 0.5 = 0.5 (floor top) -> rests at y = 0.75
+        // (a centered box rests at y = 1.0).
+        CHECK(y > 0.65f);
+        CHECK(y < 0.85f);
+        mgr->shutdown();
+    }
 #endif
 
 TEST_SUITE_END

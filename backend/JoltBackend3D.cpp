@@ -27,6 +27,7 @@
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>  // R2.0a
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>        // R2.0a
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h> // R2.0a
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h> // R10: shape local offset
 #include <Jolt/Math/Float3.h>                              // R2.0a (MeshShape VertexList = Array<Float3>)
 #include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/GroupFilter.h>
@@ -193,23 +194,30 @@ private:
 // =============================================================================
 JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
     using namespace JPH;
+    RefConst<Shape> inner;
     switch (desc.shape) {
     case ColliderShape::Box: {
         BoxShapeSettings s(Vec3(desc.halfExtents.x, desc.halfExtents.y, desc.halfExtents.z));
         auto r = s.Create();
-        return r.IsValid() ? r.Get() : nullptr;
+        if (!r.IsValid()) return nullptr;
+        inner = r.Get();
+        break;
     }
     case ColliderShape::Sphere: {
         SphereShapeSettings s(desc.radius);
         auto r = s.Create();
-        return r.IsValid() ? r.Get() : nullptr;
+        if (!r.IsValid()) return nullptr;
+        inner = r.Get();
+        break;
     }
     case ColliderShape::Capsule: {
         float halfHeight = desc.height * 0.5f - desc.radius;
         if (halfHeight < 0.0f) halfHeight = 0.0f;
         CapsuleShapeSettings s(halfHeight, desc.radius);
         auto r = s.Create();
-        return r.IsValid() ? r.Get() : nullptr;
+        if (!r.IsValid()) return nullptr;
+        inner = r.Get();
+        break;
     }
     // ---- R2.0a: advanced shapes (cooking inputs via ColliderShapeData) ----
     case ColliderShape::ConvexHull: {
@@ -224,7 +232,8 @@ JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
         ConvexHullShapeSettings settings(pts.begin(), (int)pts.size());
         auto r = settings.Create();
         if (!r.IsValid()) return nullptr;
-        return r.Get();
+        inner = r.Get();
+        break;
     }
     case ColliderShape::TriangleMesh: {
         const ColliderShapeData* sd = desc.shapeData.get();
@@ -251,7 +260,8 @@ JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
         MeshShapeSettings settings(std::move(vl), std::move(tl));
         auto r = settings.Create();
         if (!r.IsValid()) return nullptr;
-        return r.Get();
+        inner = r.Get();
+        break;
     }
     case ColliderShape::Heightfield: {
         const ColliderShapeData* sd = desc.shapeData.get();
@@ -267,11 +277,23 @@ JPH::RefConst<JPH::Shape> makeShape(const ColliderDesc& desc) {
             sd->heightGridN);
         auto r = settings.Create();
         if (!r.IsValid()) return nullptr;
-        return r.Get();
+        inner = r.Get();
+        break;
     }
     default:
         return nullptr;
     }
+    // R10: local-space shape offset via RotatedTranslatedShape (identity
+    // rotation) — shifts the shape geometry relative to the body origin.
+    if (desc.offset.x != 0.0f || desc.offset.y != 0.0f || desc.offset.z != 0.0f) {
+        RotatedTranslatedShapeSettings wrapped(
+            Vec3(desc.offset.x, desc.offset.y, desc.offset.z),
+            Quat::sIdentity(), inner);
+        auto r = wrapped.Create();
+        if (!r.IsValid()) return nullptr;
+        return r.Get();
+    }
+    return inner;
 }
 
 inline JPH::ObjectLayer toObjectLayer(PhysLayer layer) noexcept {
@@ -364,6 +386,7 @@ struct JoltBackend3D::Impl {
     std::vector<PhysLayer>        bodyLayer;        // R9: category for GroupID
     std::vector<PhysLayerMask>    bodyCollideMask;  // R9: mask for SubGroupID
     std::vector<uint16_t>         colliderGeneration;
+    std::vector<uint16_t>         colliderBodyByIndex;  // R10: collider idx -> owning body idx (SetMaterial)
     std::vector<uint16_t>         jointGeneration;
     std::vector<JPH::BodyID>      jointBodyA;
     std::vector<JPH::BodyID>      jointBodyB;
@@ -506,6 +529,7 @@ bool JoltBackend3D::init3D(const PhysicsBackendDescriptor& desc) {
     _impl->bodyLayer.assign(maxBodies, 0u);
     _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
     _impl->colliderGeneration.assign(maxBodies, 0u);
+    _impl->colliderBodyByIndex.assign(maxBodies, 0u);
     _impl->jointGeneration.assign(maxBodies, 0u);
     _impl->jointBodyA.assign(maxBodies, JPH::BodyID());
     _impl->jointBodyB.assign(maxBodies, JPH::BodyID());
@@ -699,6 +723,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         bcs.mAngularVelocity = JPH::Vec3(d.angularVelocity.x, d.angularVelocity.y, d.angularVelocity.z);
         bcs.mFriction        = d.material.friction;
         bcs.mRestitution     = d.material.restitution;
+        bcs.mGravityFactor   = d.gravityScale;  // R10: creation-time gravity multiplier
         bcs.mLinearDamping   = d.linearDamping;
         bcs.mAngularDamping  = d.angularDamping;
         bcs.mMotionQuality   = d.enableCCD ? JPH::EMotionQuality::LinearCast
@@ -825,6 +850,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         bi.SetShape(bodyId, shape.GetPtr(), /*inUpdateMassProperties*/ false,
                     JPH::EActivation::Activate);
         _impl->colliderGeneration[idx] = static_cast<uint16_t>(handleGeneration(cmd.collider));
+        _impl->colliderBodyByIndex[idx] = static_cast<uint16_t>(bodyIdx);
         return;
     }
 
@@ -833,6 +859,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
         if (_impl->colliderGeneration[idx] != handleGeneration(cmd.collider)) { ++_notFoundCount; return; }
         _impl->colliderGeneration[idx] = 0u;
+        _impl->colliderBodyByIndex[idx] = 0u;
         return;
     }
 
@@ -1008,6 +1035,115 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         });
         if (!ok) { ++_notFoundCount; return; }
         bi.ActivateBody(id);
+        return;
+    }
+
+    case CT::SetRigidbodyVelocity: {
+        // R10: 2D-symmetric direct linear-velocity set (Jolt BodyInterface).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        bi.SetLinearVelocity(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z));
+        bi.ActivateBody(id);
+        return;
+    }
+
+    case CT::SetGravityScale: {
+        // R10: per-body gravity multiplier (Jolt MotionProperties gravity factor).
+        // Static bodies have no motion properties — nothing to scale.
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const bool ok = withBody(bli, id, [&](JPH::Body& body) {
+            if (!body.IsStatic()) {
+                body.GetMotionProperties()->SetGravityFactor(cmd.u.vec4.x);
+            }
+        });
+        if (!ok) { ++_notFoundCount; return; }
+        bi.ActivateBody(id);
+        return;
+    }
+
+    case CT::ApplyTorque: {
+        // R10: 3D torque vector (Box2D reads only z — same command type).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        bi.AddTorque(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z),
+                     JPH::EActivation::Activate);
+        return;
+    }
+
+    case CT::ApplyAngularImpulse: {
+        // R10: 3D angular-impulse vector (Box2D reads only z — same command type).
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        bi.AddAngularImpulse(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z));
+        bi.ActivateBody(id);
+        return;
+    }
+
+    case CT::SetMass: {
+        // R10: runtime mass override (inverse-mass swap on MotionProperties).
+        // Static bodies have no motion properties — rejected.
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        if (!(cmd.u.vec4.x > 0.0f)) { ++_notFoundCount; return; }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const bool ok = withBody(bli, id, [&](JPH::Body& body) {
+            if (!body.IsStatic()) {
+                body.GetMotionProperties()->SetInverseMass(1.0f / cmd.u.vec4.x);
+            }
+        });
+        if (!ok) { ++_notFoundCount; return; }
+        bi.ActivateBody(id);
+        return;
+    }
+
+    case CT::SetMaterial: {
+        // R10: runtime friction / restitution. Jolt keeps these per body (not
+        // per shape): resolve the collider to its owning body and set it there.
+        const uint32_t cIdx = handleIndex(cmd.collider);
+        if (cIdx == 0u || cIdx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->colliderGeneration[cIdx] != handleGeneration(cmd.collider)) {
+            ++_notFoundCount;
+            return;
+        }
+        const uint32_t idx = _impl->colliderBodyByIndex[cIdx];
+        if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const bool ok = withBody(bli, id, [&](JPH::Body& body) {
+            body.SetFriction(cmd.u.vec4.x);
+            body.SetRestitution(cmd.u.vec4.y);
+        });
+        if (!ok) { ++_notFoundCount; return; }
         return;
     }
 

@@ -120,6 +120,9 @@ struct ColliderDesc {
     float          height = 1.0f;                          // Capsule
     PhysMaterial   material{};
     bool           isTrigger = false;
+    // R10: local-space shape offset relative to the body origin. 3D applies
+    // x/y/z; 2D uses x/y (z ignored). Zero = centered on the body.
+    ayt::math::FVector3 offset{};
     // R2.0a: required for ConvexHull / TriangleMesh / Heightfield; null otherwise.
     // Conversion to backend-native types (JPH::Vec3 / JPH::Float3 / raw float*)
     // happens inside the backend TU — never leaks Jolt types into this header.
