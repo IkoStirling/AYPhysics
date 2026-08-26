@@ -25,6 +25,11 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>  // R2.0a
+
+#include <cmath>           // std::isfinite (F-P3 SetMass/SetMaterial param checks)
+#include <cstddef>
+#include <cstring>
+#include <limits>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>        // R2.0a
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h> // R2.0a
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h> // R10: shape local offset
@@ -1113,15 +1118,24 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             ++_notFoundCount;
             return;
         }
-        if (!(cmd.u.vec4.x > 0.0f)) { ++_notFoundCount; return; }
+        // F-P3: param-out-of-range path. Mass must be a positive finite float;
+        // zero / negative / NaN / Inf are caller bugs, not stale handles.
+        if (!std::isfinite(cmd.u.vec4.x) || !(cmd.u.vec4.x > 0.0f)) {
+            ++_invalidParamCount;
+            return;
+        }
         const JPH::BodyID id = _impl->bodyIdByIndex[idx];
         if (id.IsInvalid()) { ++_notFoundCount; return; }
+        bool accepted = false;
         const bool ok = withBody(bli, id, [&](JPH::Body& body) {
-            if (!body.IsStatic()) {
-                body.GetMotionProperties()->SetInverseMass(1.0f / cmd.u.vec4.x);
-            }
+            // F-P3 + F-P4: kinematic / static bodies have no MotionProperties
+            // to override. Reject (param-shaped, not missing-handle).
+            if (body.IsStatic()) { ++_invalidParamCount; return; }
+            body.GetMotionProperties()->SetInverseMass(1.0f / cmd.u.vec4.x);
+            accepted = true;
         });
         if (!ok) { ++_notFoundCount; return; }
+        if (!accepted) return;  // _invalidParamCount already incremented
         bi.ActivateBody(id);
         return;
     }
@@ -1133,6 +1147,12 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         if (cIdx == 0u || cIdx >= _impl->maxBodies) { ++_notFoundCount; return; }
         if (_impl->colliderGeneration[cIdx] != handleGeneration(cmd.collider)) {
             ++_notFoundCount;
+            return;
+        }
+        // F-P3: friction / restitution must be finite non-negative.
+        if (!std::isfinite(cmd.u.vec4.x) || cmd.u.vec4.x < 0.0f ||
+            !std::isfinite(cmd.u.vec4.y) || cmd.u.vec4.y < 0.0f) {
+            ++_invalidParamCount;
             return;
         }
         const uint32_t idx = _impl->colliderBodyByIndex[cIdx];

@@ -9,6 +9,8 @@
 #include "AYTest.h"
 #include "Test_JoltBackend3D_Helpers.h"
 
+#include <limits>
+
 using namespace ayt::physics;
 using namespace ayt::physics::test_helpers;
 
@@ -756,6 +758,57 @@ TEST_SUITE(JoltBackend3DTests)
         // Same 30-step force window: delta after the set (a=2) must be > 3x
         // the pre-set delta (a=0.5).
         CHECK((vAfter - vLow) > 3.0f * vLow);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMassRejectsStaticBody) {
+        // F-P4: SetMass on a static body must be rejected. Jolt's static
+        // bodies have no MotionProperties to override; the rejected call must
+        // not crash and must tick the invalid-param counter after dispatch.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Static;
+        w->createRigidbody(rb, h);
+
+        const uint64_t invalidBefore = static_cast<JoltBackend3D*>(
+            mgr->backend3D())->invalidParamCount();
+        // API boundary can't tell Dynamic vs Static — cmd is queued and the
+        // backend rejects on dispatch.
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, 2.5f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        mgr->step(1.0f / 60.0f);  // drain the queue
+        waitForDrain(*mgr, 100);
+        CHECK(static_cast<JoltBackend3D*>(mgr->backend3D())->invalidParamCount()
+              > invalidBefore);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMassRejectsBadParam) {
+        // F-P3: SetMass with non-positive / NaN / +Inf is a caller bug —
+        // must be rejected synchronously at the API boundary (PhysicsWorld3D::
+        // setMass), with PhysResult::InvalidParam. The backend counter never
+        // sees these — the queue never receives them.
+        auto mgr = makeJoltMgr();
+        PhysicsWorld3D* w = mgr->world3D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.mass = 1.0f;
+        w->createRigidbody(rb, h);
+
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, -1.0f)),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h,  0.0f)),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, std::numeric_limits<float>::quiet_NaN())),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, std::numeric_limits<float>::infinity())),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        // Valid mass still works — proves the rejection is parameter-driven.
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h,  2.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
         mgr->shutdown();
     }
 

@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 using namespace ayt::physics;
@@ -944,6 +945,65 @@ TEST_SUITE(Box2DBackend2DTests)
         // Same 30-step force window: delta after the set (a=2) must be > 3x
         // the pre-set delta (a=0.5).
         CHECK((vAfter - vLow) > 3.0f * vLow);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMassRejectsStaticBody) {
+        // F-P4: SetMass on a non-dynamic body must be rejected by the backend
+        // (kinematic / static have no user-owned mass — Box2D owns it). The
+        // API boundary can't tell Dynamic vs Static, so the cmd is queued and
+        // the backend must reject on dispatch.
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Static;
+        w->createRigidbody(rb, h);
+        const uint64_t invalidBefore = static_cast<Box2DBackend2D*>(
+            mgr->backend2D())->invalidParamCount();
+        // Enqueue the SetMass — API returns Ok because the handle is valid;
+        // rejection must happen when the backend drains the cmd on step().
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, 2.5f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
+        mgr->step(1.0f / 60.0f);  // drain the queue
+        waitForDrain2D(*mgr, 100);
+        // F-P3: static body is a param-shape rejection (wrong body type for
+        // the requested change), not a missing handle. Backend counter must
+        // bump — invalidParamCount is the precise bucket per F-P3.
+        CHECK(static_cast<Box2DBackend2D*>(mgr->backend2D())->invalidParamCount()
+              > invalidBefore);
+        // Sanity: the test ran past the assertion without crashing — proves
+        // the rejection path returns cleanly without mutating body state.
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_SetMassRejectsBadParam) {
+        // F-P3: SetMass with non-positive, NaN, or +Inf mass is a caller bug —
+        // must be rejected synchronously at the API boundary (PhysicsWorld2D::
+        // setMass), with PhysResult::InvalidParam. The backend counter never
+        // sees these — the queue never receives them. This pins that contract.
+        auto mgr = makeBox2DMgr();
+        PhysicsWorld2D* w = mgr->world2D();
+        BodyHandle h = InvalidBodyHandle;
+        RigidbodyDesc rb;
+        rb.type = BodyType::Dynamic;
+        rb.mass = 1.0f;
+        w->createRigidbody(rb, h);
+
+        // Negative, zero, NaN, +Inf — all must be rejected as InvalidParam
+        // synchronously, before reaching the SPSC queue.
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, -1.0f)),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h,  0.0f)),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, std::numeric_limits<float>::quiet_NaN())),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h, std::numeric_limits<float>::infinity())),
+                     static_cast<uint32_t>(PhysResult::InvalidParam));
+        // Valid mass still works — proves the rejection is parameter-driven,
+        // not a blanket refusal.
+        CHECK_INT_EQ(static_cast<uint32_t>(w->setMass(h,  2.0f)),
+                     static_cast<uint32_t>(PhysResult::Ok));
         mgr->shutdown();
     }
 

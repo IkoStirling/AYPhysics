@@ -2,6 +2,8 @@
 
 #include "AYPhysics/PhysicsManager.h"
 
+#include <cmath>
+
 namespace ayt::physics {
 
 template <typename Handle>
@@ -345,7 +347,11 @@ PhysResult PhysicsWorld2D::setGravityScale(BodyHandle h, float scale) {
 PhysResult PhysicsWorld2D::setMass(BodyHandle h, float mass) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
-    if (!isValidHandle(h) || !(mass > 0.0f)) return PhysResult::InvalidParam;
+    // F-P3: reject non-finite or non-positive mass synchronously — Inf/NaN
+    // slip past the bare `!(mass > 0.0f)` check (Inf > 0 is true).
+    if (!isValidHandle(h) || !std::isfinite(mass) || !(mass > 0.0f)) {
+        return PhysResult::InvalidParam;
+    }
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::SetMass;
     cmd.body = h;
@@ -357,7 +363,13 @@ PhysResult PhysicsWorld2D::setMass(BodyHandle h, float mass) {
 PhysResult PhysicsWorld2D::setMaterial(ColliderHandle h, float friction, float restitution) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;
-    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    // F-P3: reject NaN/Inf/negative synchronously — backends would happily
+    // take them otherwise.
+    if (!isValidHandle(h) ||
+        !std::isfinite(friction) || friction < 0.0f ||
+        !std::isfinite(restitution) || restitution < 0.0f) {
+        return PhysResult::InvalidParam;
+    }
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::SetMaterial;
     cmd.collider = h;

@@ -133,7 +133,12 @@ std::unique_ptr<PhysicsManager> PhysicsManager::create(const PhysicsBackendDescr
 
     PhysicsBackendInfo info2D = mgr->_backend2D->describe();
     info2D.maxBodies = desc.maxBodies;
-    info2D.maxColliders = desc.maxBodies * 2;
+    // F-P1: Box2DBackend2D shares a single index pool across bodies, colliders,
+    // and joints (every per-collider / per-joint slot is sized by maxBodies, see
+    // Box2DBackend2D::init2D). Telling the backend maxColliders = 2*maxBodies
+    // would silently reject the upper half as PhysResult::NotFound. Clamp to the
+    // actual capacity the backend can honour until §6.4 separates the pools.
+    info2D.maxColliders = desc.maxBodies;
     info2D.maxJoints    = desc.maxBodies;
     if (!mgr->_backend2D->start(info2D)) {
         // F-K — symmetric rollback: 3D was started above, must stop before we

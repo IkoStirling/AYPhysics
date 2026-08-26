@@ -2,6 +2,8 @@
 
 #include "AYPhysics/PhysicsManager.h"
 
+#include <cmath>
+
 namespace ayt::physics {
 
 // =========================================================================
@@ -209,7 +211,11 @@ PhysResult PhysicsWorld3D::applyAngularImpulse(BodyHandle h, const ayt::math::FV
 PhysResult PhysicsWorld3D::setMass(BodyHandle h, float mass) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue()) return PhysResult::InvalidState;
-    if (!isValidHandle(h) || !(mass > 0.0f)) return PhysResult::InvalidParam;
+    // F-P3: reject non-finite or non-positive mass synchronously — Inf/NaN
+    // slip past the bare `!(mass > 0.0f)` check (Inf > 0 is true).
+    if (!isValidHandle(h) || !std::isfinite(mass) || !(mass > 0.0f)) {
+        return PhysResult::InvalidParam;
+    }
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::SetMass;
     cmd.body = h;
@@ -221,7 +227,12 @@ PhysResult PhysicsWorld3D::setMass(BodyHandle h, float mass) {
 PhysResult PhysicsWorld3D::setMaterial(ColliderHandle h, float friction, float restitution) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue()) return PhysResult::InvalidState;
-    if (!isValidHandle(h)) return PhysResult::InvalidParam;
+    // F-P3: reject NaN/Inf/negative synchronously.
+    if (!isValidHandle(h) ||
+        !std::isfinite(friction) || friction < 0.0f ||
+        !std::isfinite(restitution) || restitution < 0.0f) {
+        return PhysResult::InvalidParam;
+    }
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::SetMaterial;
     cmd.collider = h;

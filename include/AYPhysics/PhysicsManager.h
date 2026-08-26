@@ -50,6 +50,12 @@ public:
 
     void shutdown();
 
+    // True while the physics thread is alive. F-P2: lets callers distinguish
+    // a real stepAndWait timeout (running, but step didn't complete) from the
+    // expected InvalidState on clean shutdown (running flipped to false while
+    // the step was still in flight).
+    bool isRunning() const { return _running.load(std::memory_order_acquire); }
+
     // Internal — accessed by World impls (friend below).
     PhysicsCommandQueue* commandQueue() { return _queue.get(); }
     PhysicsCommandQueue* commandQueue2D() { return _queue2D.get(); }

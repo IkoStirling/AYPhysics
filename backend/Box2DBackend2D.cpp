@@ -110,6 +110,12 @@ struct Box2DBackend2D::Impl {
     mutable std::mutex           collisionEventMu;
     std::vector<CollisionEvent>    collisionEventQueue;
 
+    // F-P1: Box2DBackend2D shares a single index pool across bodies, colliders,
+    // and joints. Every per-collider / per-joint slot array (colliderGeneration,
+    // shapeIdByIndex, jointGeneration, jointIdByIndex) is sized by `maxBodies`,
+    // so the *combined* cap on (bodies + colliders + joints) is maxBodies.
+    // The manager clamps info2D.maxColliders to maxBodies to honour this; see
+    // PhysicsManager::create. Future work: separate index pools per §6.4.
     uint32_t maxBodies = 0;
 };
 
@@ -511,13 +517,20 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             ++_notFoundCount;
             return;
         }
-        if (!(cmd.u.vec4.x > 0.0f)) { ++_notFoundCount; return; }
+        // F-P3: param-out-of-range path. Mass must be a positive finite float;
+        // zero / negative / NaN / Inf are caller bugs, not stale handles.
+        if (!std::isfinite(cmd.u.vec4.x) || !(cmd.u.vec4.x > 0.0f)) {
+            ++_invalidParamCount;
+            return;
+        }
         const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
         if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
         // b2Body_SetMassData writes mass/inertia on any body type; kinematic
         // and static bodies have no meaningful mass (Box2D owns it) — dynamic
-        // only, matching the creation-path override.
-        if (b2Body_GetType(bodyId) != b2_dynamicBody) { ++_notFoundCount; return; }
+        // only, matching the creation-path override. F-P3: this is also a
+        // param-shaped rejection (wrong body type for the requested change),
+        // not a missing handle.
+        if (b2Body_GetType(bodyId) != b2_dynamicBody) { ++_invalidParamCount; return; }
         b2MassData md = b2Body_GetMassData(bodyId);
         md.mass = cmd.u.vec4.x;
         b2Body_SetMassData(bodyId, md);
@@ -532,6 +545,14 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
         if (_impl->colliderGeneration[idx] != handleGeneration(cmd.collider)) {
             ++_notFoundCount;
+            return;
+        }
+        // F-P3: friction / restitution must be finite non-negative. Box2D's
+        // own setter would happily take NaN and propagate it; reject here so
+        // bad-call diagnostics surface as _invalidParamCount.
+        if (!std::isfinite(cmd.u.vec4.x) || cmd.u.vec4.x < 0.0f ||
+            !std::isfinite(cmd.u.vec4.y) || cmd.u.vec4.y < 0.0f) {
+            ++_invalidParamCount;
             return;
         }
         const b2ShapeId shapeId = _impl->shapeIdByIndex[idx];

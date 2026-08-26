@@ -105,8 +105,15 @@ bool PhysicsSubSystem::runFixedStep(float fixedDeltaTime)
         fixedDeltaTime,
         _descriptor.fixedStepTimeout);
     if (result != PhysResult::Ok) {
-        ayt::log::error("[Physics] Fixed step completion failed: %s",
-                        toString(result));
+        // F-P2: clean shutdown wakes the cv with !_running before the in-flight
+        // step's completionSequence lands; stepAndWait then returns InvalidState.
+        // That is expected — don't pollute the log with a spurious "failed"
+        // line on every shutdown.
+        if (_manager->isRunning()) {
+            ayt::log::error("[Physics] Fixed step completion failed: %s",
+                            toString(result));
+            return false;
+        }
         return false;
     }
 

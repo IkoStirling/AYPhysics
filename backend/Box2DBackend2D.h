@@ -34,6 +34,11 @@ public:
     uint64_t stepCount()             const noexcept { return _stepCount; }
     uint64_t commandCount()          const noexcept { return _commandCount; }
     uint64_t notFoundCount()         const noexcept { return _notFoundCount; }
+    // F-P3: distinct counter for commands dropped because the *parameter* was
+    // out of range (e.g. SetMass <= 0, SetMaterial NaN), as opposed to the
+    // handle not being live. Lets diagnostics distinguish caller bugs from
+    // stale-handle races.
+    uint64_t invalidParamCount()     const noexcept { return _invalidParamCount; }
     uint64_t lockstepRefusedCount()  const noexcept { return _lockstepRefusedCount; }
     uint64_t collisionEventCount()   const noexcept { return _collisionEventCount; }
     uint64_t lastSnapshotBodyVisitCount() const noexcept {
@@ -57,6 +62,7 @@ private:
     uint64_t _stepCount            = 0;
     uint64_t _commandCount         = 0;
     uint64_t _notFoundCount         = 0;
+    uint64_t _invalidParamCount     = 0;
     uint64_t _lockstepRefusedCount  = 0;
     uint64_t _collisionEventCount  = 0;
     uint64_t _lastSnapshotBodyVisitCount = 0;
