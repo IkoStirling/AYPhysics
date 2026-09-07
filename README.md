@@ -101,6 +101,11 @@ thread therefore enters `FixedPostPhysics` only after the matching snapshot is
 published; a queue error, timeout, or shutdown fails the phase and the pending
 simulation tick is not committed.
 
+Default Client / Server / Editor hosts install this subsystem through
+`PhysicsRuntimeModule` (`AYPhysics.Runtime`) and pass the backend descriptor to
+the module constructor. `PhysicsSubSystem::registerSubSystem()` remains the
+compatibility path for standalone demos and focused tests.
+
 ---
 
 ## Directory (target)

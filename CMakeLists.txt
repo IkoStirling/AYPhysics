@@ -17,6 +17,7 @@ set(SRC_FILES
     src/AYPhysicsWorld3D.cpp
     src/AYPhysicsWorld2D.cpp
     src/AYPhysicsSubSystem.cpp
+    src/AYPhysicsRuntimeModule.cpp
     src/AYPhysicsEventBridge.cpp
     src/AYPhysicsQueryAdapter.cpp
     src/Physics/PhysicsScene.cpp
@@ -34,6 +35,7 @@ set(HEAD_FILES
     include/AYPhysics/PhysicsWorld3D.h
     include/AYPhysics/PhysicsWorld2D.h
     include/AYPhysics/PhysicsSubSystem.h
+    include/AYPhysics/PhysicsRuntimeModule.h
     include/AYPhysics/PhysicsEventBridge.h
     include/AYPhysics/PhysicsQueryAdapter.h
     include/AYPhysics/PhysicsBackendTestAccess.h
@@ -144,6 +146,7 @@ target_include_directories(${MODULE_NAME} PRIVATE
 )
 
 target_link_libraries(${MODULE_NAME} PUBLIC
+    AY::Module
     AYMath
     AYPlatform   # Thread::yield/sleep used by _physicsThreadMain idle backoff
     AYTime       # Duration / TimePoint / Clock (header-only v1.2 value-type)
