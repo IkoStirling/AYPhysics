@@ -42,6 +42,23 @@ public:
                                const ayt::math::FVector3& halfExtents,
                                PhysLayerMask layerMask = 0xFFFFFFFFu);
 
+    /**
+     * @brief Blocks for the closest 2D physics hit along a ray.
+     * @param ray Query origin and direction; Box2D evaluates the XY plane.
+     * @param outHit Receives the completed response. On PhysResult::Ok, inspect
+     * RaycastHit::hit to distinguish a miss from a collision.
+     * @param layerMask Physics collision layers eligible for the query.
+     * @return Ok when the query completed, InvalidState when the 2D mailbox is
+     * unavailable, BackendError on timeout, or a backend-reported PhysResult.
+     * @framephase
+     * Use for queries that require an immediate answer. Prefer async queries
+     * when the result can be consumed in a later physics frame.
+     * @threading
+     * Call from the game/simulation thread, never from the physics worker; this
+     * method waits for that worker to service the query mailbox.
+     * @failure
+     * outHit is not modified when submission cannot complete.
+     */
     PhysResult raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                            PhysLayerMask layerMask = 0xFFFFFFFFu);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,

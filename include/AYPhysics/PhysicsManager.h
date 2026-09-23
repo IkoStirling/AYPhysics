@@ -35,6 +35,16 @@ public:
     ~PhysicsManager();
 
     PhysicsWorld3D* world3D() { return _world3D.get(); }
+    /**
+     * @brief Returns the manager-owned Box2D world facade.
+     * @return Borrowed world pointer, or nullptr when the 2D backend is absent.
+     * @ownership
+     * PhysicsManager owns the world. Do not retain the pointer after shutdown
+     * or manager destruction.
+     * @threading
+     * Resolve the facade on the game/simulation thread. Individual world
+     * methods define whether they enqueue work or synchronously wait for it.
+     */
     PhysicsWorld2D* world2D() { return _world2D.get(); }
 
     // Enqueue step; returns immediately. deltaTime clamped by backend.
