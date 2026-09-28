@@ -74,7 +74,13 @@ else()
     target_compile_options(${TEST_TARGET} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-ay_add_test(${TEST_TARGET})
+ay_add_test_tiers(${TEST_TARGET} PREFIX physics DEFAULT_TIER integration
+    FAST_SUITES PhysicsTypesTests PhysicsHandlesTests PhysicsCommandQueueTests
+                PhysicsSnapshotTests NullBackend3DTests
+    TIMEOUT 180 RUN_SERIAL)
+# Record resolved (not merely requested/cache) backend configuration for audits.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-features.json"
+    "{\"jolt\":\"${AYPHYSICS_BUILD_JOLT}\",\"box2d\":\"${AYPHYSICS_BUILD_BOX2D}\"}\n")
 
 # R1.5c: standalone bench executable (NOT inside AYPhysics_Tests). Built only
 # when Jolt is available (the bench measures real Jolt timing �?see design.md
