@@ -2,6 +2,8 @@
 
 AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, Box2D for 2D).
 
+Box2D raycast results include both the body and the exact generation-checked collider handle. This lets gameplay map multiple shapes on one body to distinct hit parts. A missing collider is `InvalidColliderHandle` (including current 3D query results); body-only overlaps do not identify an individual shape.
+
 - **Authoritative design:** [`design.md`](design.md) (v0.3, 2026-07-30) — see §17 for perf / Jolt gate
 - **AI / dev rules:** [`CLAUDE.md`](CLAUDE.md)
 - **3D backend:** Jolt (locked, real impl via vcpkg `jolt-physics` 5.5.0); see design §4.1

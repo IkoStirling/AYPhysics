@@ -160,6 +160,7 @@ struct JointDesc {
 struct RaycastHit {
     bool       hit      = false;
     BodyHandle body     = InvalidBodyHandle;
+    ColliderHandle collider = InvalidColliderHandle; // Exact shape for 2D Box2D rays.
     ayt::math::FVector3 point{};
     ayt::math::FVector3 normal{};
     float      distance = 0.0f;

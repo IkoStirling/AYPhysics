@@ -73,6 +73,18 @@ BodyHandle resolveBodyHandle(b2BodyId id,
     if (!B2_ID_EQUALS(bodyIdByIndex[idx], id)) return InvalidBodyHandle;
     return h;
 }
+ColliderHandle resolveColliderHandle(b2ShapeId id,
+                                     const std::vector<b2ShapeId>& shapes,
+                                     const std::vector<uint16_t>& generations,
+                                     uint32_t maxBodies) {
+    if(!b2Shape_IsValid(id))return InvalidColliderHandle;
+    const auto handle=static_cast<ColliderHandle>(
+        reinterpret_cast<uintptr_t>(b2Shape_GetUserData(id)));
+    const auto index=handleIndex(handle);
+    if(!index || index>=maxBodies || generations[index]!=handleGeneration(handle) ||
+       !B2_ID_EQUALS(shapes[index],id))return InvalidColliderHandle;
+    return handle;
+}
 
 }  // namespace
 
@@ -592,6 +604,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
 
         b2ShapeDef shapeDef = b2DefaultShapeDef();
+        shapeDef.userData = handleToUserData(cmd.collider);
         shapeDef.density    = d.material.density > 0.0f ? d.material.density : 1.0f;
         shapeDef.material.friction    = d.material.friction;
         shapeDef.material.restitution = d.material.restitution;
@@ -891,6 +904,8 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
             const b2BodyId bodyId = b2Shape_GetBody(hit.shapeId);
             rh.body        = resolveBodyHandle(bodyId, _impl->bodyIdByIndex,
                                                _impl->bodyGeneration, _impl->maxBodies);
+            rh.collider = resolveColliderHandle(hit.shapeId,_impl->shapeIdByIndex,
+                _impl->colliderGeneration,_impl->maxBodies);
             rh.point       = ayt::math::FVector3(hit.point.x, hit.point.y, 0.0f);
             rh.normal      = ayt::math::FVector3(hit.normal.x, hit.normal.y, 0.0f);
             rh.distance    = hit.fraction * kRayCastMaxDistance;
@@ -1024,6 +1039,8 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
             const b2BodyId bodyId     = b2Shape_GetBody(hit.shapeId);
             outResponse.firstHit.body = resolveBodyHandle(bodyId, _impl->bodyIdByIndex,
                                                           _impl->bodyGeneration, _impl->maxBodies);
+            outResponse.firstHit.collider = resolveColliderHandle(hit.shapeId,
+                _impl->shapeIdByIndex,_impl->colliderGeneration,_impl->maxBodies);
             outResponse.firstHit.point =
                 ayt::math::FVector3(hit.point.x, hit.point.y, 0.0f);
             outResponse.firstHit.normal =

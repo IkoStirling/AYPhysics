@@ -2,6 +2,8 @@
 
 > **Status:** v0.5 (2026-07-31) — R1 + R1.5a + R1.5b + R1.5c shipped; R2.0a (ConvexHull + TriangleMesh + Heightfield shapes) next
 > **Backend:** Jolt 3D (locked, real impl via vcpkg `jolt-physics` 5.5.0) + Box2D 2D (locked, R2.5 parallel)
+
+Box2D raycasts retain the exact collider handle in `RaycastHit::collider`. Shape user data stores the packed collider handle and query resolution verifies its generation and current shape ID; a stale shape never supplies a valid part identity. Overlap queries still return body identities. Jolt/other backends currently leave the collider field invalid.
 > **Authority:** this file is the source of truth for AYPhysics architecture.
 > **Related:** [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B dual paths.
 

@@ -246,8 +246,34 @@ TEST_SUITE(Box2DBackend2DTests)
         CHECK_INT_EQ(static_cast<uint32_t>(w->raycastSync(ray, hit)),
                      static_cast<uint32_t>(PhysResult::Ok));
         CHECK(hit.hit);
+        CHECK_INT_EQ(hit.collider,colH);
         CHECK(hit.distance > 3.0f);
         CHECK(hit.distance < 5.0f);
+        mgr->shutdown();
+    }
+
+    TEST_CASE(Real_RaycastDistinguishesCollidersOnOneBody) {
+        auto mgr=makeBox2DMgr();
+        auto* world=mgr->world2D();
+        BodyHandle body=InvalidBodyHandle;
+        RigidbodyDesc rigid{};rigid.type=BodyType::Static;
+        CHECK(world->createRigidbody(rigid,body)==PhysResult::Ok);
+        ColliderDesc shape{};shape.body=body;shape.shape=ColliderShape::Sphere;
+        shape.radius=0.3f;shape.offset={-2.0f,0.0f,0.0f};
+        ColliderHandle left=InvalidColliderHandle,right=InvalidColliderHandle;
+        CHECK(world->createCollider(shape,left)==PhysResult::Ok);
+        shape.offset={2.0f,0.0f,0.0f};
+        CHECK(world->createCollider(shape,right)==PhysResult::Ok);
+        for(int i=0;i<5;++i)mgr->step(1.0f/60.0f);
+        waitForDrain2D(*mgr,200);
+        ayt::math::Ray ray{};ray.dir={0.0f,-1.0f,0.0f};
+        RaycastHit hit{};
+        ray.origin={-2.0f,2.0f,0.0f};
+        CHECK(world->raycastSync(ray,hit)==PhysResult::Ok);
+        CHECK(hit.hit && hit.body==body && hit.collider==left);
+        ray.origin={2.0f,2.0f,0.0f};
+        CHECK(world->raycastSync(ray,hit)==PhysResult::Ok);
+        CHECK(hit.hit && hit.body==body && hit.collider==right);
         mgr->shutdown();
     }
 
