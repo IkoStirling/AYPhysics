@@ -24,6 +24,8 @@ add_executable(${TEST_TARGET}
     # compiled; Mock case runs in Null mode (proves shared_ptr survives
     # create-pool without Jolt linkage).
     Test_JoltBackend3D_AdvancedShapes.cpp
+    Test_CharacterController3D.cpp
+    Test_JoltColliderHits.cpp
     Test_Box2DBackend2D.cpp
     # MockBackend3D.cpp provides the testaccess:: namespace symbols; the static
     # lib drops them when no consumer in the lib references them, so we add the

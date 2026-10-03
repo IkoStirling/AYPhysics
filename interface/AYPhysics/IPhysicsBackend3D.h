@@ -17,6 +17,9 @@ public:
     // Set / query gravity.
     virtual void setGravity(const ayt::math::FVector3& g) = 0;
 
+    /// Immutable backend capability; Null/Mock do not simulate controllers.
+    virtual bool supportsCharacterControllers() const { return false; }
+
     // 3D-specific mutators (called from execute() after decoding PhysicsCommand).
     // Implementations decode the compact cmd and look up the create payload via
     // createSlot when type == Create*.

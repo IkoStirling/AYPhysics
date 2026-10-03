@@ -9,6 +9,7 @@
 //     create payloads live in PhysicsCreatePool out-of-band.
 
 #include "AYPhysics/PhysicsHandles.h"
+#include "AYPhysics/CharacterController3D.h"
 
 #include <cstdint>
 #include <memory>
@@ -160,7 +161,8 @@ struct JointDesc {
 struct RaycastHit {
     bool       hit      = false;
     BodyHandle body     = InvalidBodyHandle;
-    ColliderHandle collider = InvalidColliderHandle; // Exact shape for 2D Box2D rays.
+    /// Exact generation-checked collider for Box2D and Jolt rays, including compounds.
+    ColliderHandle collider = InvalidColliderHandle;
     ayt::math::FVector3 point{};
     ayt::math::FVector3 normal{};
     float      distance = 0.0f;
@@ -207,6 +209,7 @@ struct PhysFrameSnapshot {
     std::vector<BodyTransform> transforms;     // sparse: Awake ∪ AlwaysSync
     std::vector<CollisionEvent> collisionEvents;
     std::vector<QueryResult>    queryResults;  // async queries, keyed by queryId
+    std::vector<CharacterController3DState> characters; // All live 3D controllers.
 };
 
 // =============================================================================

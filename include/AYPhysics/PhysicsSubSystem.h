@@ -44,6 +44,8 @@ public:
                      const ayt::game::FrameContext& context) override;
     void shutdown() override;
 
+    /// Borrow the initialized physics runtime; nullptr before initialize/after shutdown.
+    /// Resolve on the game thread; controller handles must be released at World teardown.
     PhysicsManager* manager() { return _manager.get(); }
     const PhysicsManager* manager() const { return _manager.get(); }
 

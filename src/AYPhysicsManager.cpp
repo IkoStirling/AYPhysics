@@ -226,6 +226,7 @@ void PhysicsManager::publishSnapshot() {
     _snapshots[oldFront].transforms.clear();
     _snapshots[oldFront].collisionEvents.clear();
     _snapshots[oldFront].queryResults.clear();
+    _snapshots[oldFront].characters.clear();
 }
 
 void PhysicsManager::shutdown() {
@@ -267,7 +268,8 @@ void PhysicsManager::_physicsThreadMain() {
             const PhysicsCreatePayload* pPayload = nullptr;
             if (cmd.type == PhysicsCommandType::CreateRigidbody ||
                 cmd.type == PhysicsCommandType::CreateCollider ||
-                cmd.type == PhysicsCommandType::CreateJoint) {
+                cmd.type == PhysicsCommandType::CreateJoint ||
+                cmd.type == PhysicsCommandType::CreateCharacter) {
                 if (cmd.createSlot != InvalidCreateSlotId &&
                     _createPool->take(cmd.createSlot, payload)) {
                     pPayload = &payload;

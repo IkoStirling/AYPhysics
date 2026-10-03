@@ -71,6 +71,7 @@ TEST_SUITE(JoltBackend3DStubTests)
         CHECK(backend.start(backend.describe()));
         SyncQueryRequest req{};
         req.requestId = 42;
+        req.ray.dir = {0,0,1}; // Valid direction; an empty world returns no hit.
         SyncQueryResponse resp{};
         backend.executeSync(req, resp);
         CHECK_INT_EQ(static_cast<uint32_t>(resp.status),

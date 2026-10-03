@@ -34,6 +34,8 @@ public:
 
     ~PhysicsManager();
 
+    /// Borrow the manager-owned 3D world on the game thread. Mutators enqueue;
+    /// controller states are read after FixedPhysics/stepAndWait. Invalid after destruction.
     PhysicsWorld3D* world3D() { return _world3D.get(); }
     /**
      * @brief Returns the manager-owned Box2D world facade.

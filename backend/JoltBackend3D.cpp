@@ -33,6 +33,10 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>        // R2.0a
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h> // R2.0a
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h> // R10: shape local offset
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/Shape/EmptyShape.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
+#include "../src/CharacterController3DValidation.h"
 #include <Jolt/Math/Float3.h>                              // R2.0a (MeshShape VertexList = Array<Float3>)
 #include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/GroupFilter.h>
@@ -334,18 +338,51 @@ JPH::RRayCast makeJoltRayCast(const ayt::math::FVector3& origin,
         jDir);
 }
 
-// Jolt rejects null shapes for every motion type. R1.5b uses a tiny
-// placeholder until CreateCollider attaches the real shape via SetShape.
-JPH::RefConst<JPH::Shape> makePlaceholderShape(
-    std::vector<JPH::RefConst<JPH::Shape>>& shapeCache) {
-    JPH::SphereShapeSettings settings(0.001f);
+// EmptyShape keeps bodies with no colliders out of collision and ray queries.
+JPH::RefConst<JPH::Shape> makePlaceholderShape() {
+    JPH::EmptyShapeSettings settings;
     const JPH::ShapeSettings::ShapeResult result = settings.Create();
     if (!result.IsValid()) {
         return nullptr;
     }
-    shapeCache.push_back(result.Get());
     return result.Get();
 }
+
+struct QueryLayerFilter final : JPH::ObjectLayerFilter {
+    explicit QueryLayerFilter(PhysLayerMask value) : mask(value) {}
+    bool ShouldCollide(JPH::ObjectLayer layer) const override {
+        return layer < 32 && (mask & (1u << layer)) != 0;
+    }
+    PhysLayerMask mask;
+};
+
+// Virtual controllers ignore sensors and honor both sides of the body masks.
+struct CharacterBodyFilter final : JPH::BodyFilter {
+    explicit CharacterBodyFilter(const CharacterController3DDesc& value) : desc(value) {}
+    bool ShouldCollideLocked(const JPH::Body& body) const override {
+        const auto& group = body.GetCollisionGroup();
+        const auto layer = group.GetGroupID();
+        return !body.IsSensor() && layer < 32 && (desc.collideMask & (1u << layer)) &&
+            (group.GetSubGroupID() & (1u << desc.layer));
+    }
+    const CharacterController3DDesc& desc;
+};
+
+struct CharacterRecord final : JPH::CharacterContactListener {
+    CharacterHandle handle = InvalidCharacterHandle;
+    CharacterController3DDesc desc{};
+    CharacterController3DInput input{};
+    JPH::Ref<JPH::CharacterVirtual> controller;
+    bool needsRefresh = true;
+    bool OnCharacterContactValidate(const JPH::CharacterVirtual*,
+                                   const JPH::CharacterContact& contact) override {
+        if (!contact.mCharacterB) return false;
+        const uint64_t data = contact.mCharacterB->GetUserData();
+        const uint32_t layer = static_cast<uint32_t>(data >> 32);
+        const uint32_t mask = static_cast<uint32_t>(data);
+        return layer < 32 && (desc.collideMask & (1u << layer)) && (mask & (1u << desc.layer));
+    }
+};
 
 // Per-body-side lock helper: write-lock a body, return Body& via callback.
 // We use BodyLockWrite (not BodyLockRead) because ConstraintSettings::Create
@@ -391,14 +428,42 @@ struct JoltBackend3D::Impl {
     std::vector<PhysLayer>        bodyLayer;        // R9: category for GroupID
     std::vector<PhysLayerMask>    bodyCollideMask;  // R9: mask for SubGroupID
     std::vector<uint16_t>         colliderGeneration;
-    std::vector<uint16_t>         colliderBodyByIndex;  // R10: collider idx -> owning body idx (SetMaterial)
+    std::vector<BodyHandle>       colliderBodyByIndex; // Full owner identity, including generation.
+    std::vector<JPH::RefConst<JPH::Shape>> colliderShapes;
+    std::vector<bool> colliderTriggers;
+    std::vector<std::vector<uint32_t>> bodyColliders;
+    std::vector<std::unique_ptr<CharacterRecord>> characters;
+    JPH::CharacterVsCharacterCollisionSimple characterCollision;
     std::vector<uint16_t>         jointGeneration;
     std::vector<JPH::BodyID>      jointBodyA;
     std::vector<JPH::BodyID>      jointBodyB;
     std::vector<JPH::Constraint*>   jointConstraintByIndex;
 
-    // Shape retention (collider shapes cached until backend destruction).
-    std::vector<JPH::RefConst<JPH::Shape>> shapeCache;
+    // Build a tagged compound; child user data is the complete ColliderHandle.
+    bool rebuildBodyShape(uint32_t bodyIdx) {
+        const auto& colliders = bodyColliders[bodyIdx];
+        JPH::RefConst<JPH::Shape> shape;
+        if (colliders.empty()) shape = makePlaceholderShape();
+        else if (colliders.size() == 1) shape = colliderShapes[colliders.front()];
+        else {
+            JPH::StaticCompoundShapeSettings settings;
+            for (auto index : colliders)
+                settings.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(),
+                    colliderShapes[index].GetPtr(), makeHandle(index, colliderGeneration[index]));
+            const auto result = settings.Create();
+            if (!result.IsValid()) return false;
+            shape = result.Get();
+        }
+        if (!shape) return false;
+        auto& bi = physicsSystem->GetBodyInterfaceNoLock();
+        const auto id = bodyIdByIndex[bodyIdx];
+        bi.SetShape(id, shape.GetPtr(), false, JPH::EActivation::Activate);
+        withBody(physicsSystem->GetBodyLockInterface(), id, [&](JPH::Body& body) {
+            body.SetIsSensor(!colliders.empty() && colliderTriggers[colliders.front()]);
+        });
+        for (auto& character : characters) if (character) character->needsRefresh = true;
+        return true;
+    }
 
     mutable std::mutex                            collisionEventMu;
     std::vector<CollisionEvent>                   collisionEventQueue;
@@ -457,6 +522,8 @@ struct JoltBackend3D::Impl {
     }
 
     ~Impl() {
+        characters.clear(); // Controllers must die before their PhysicsSystem.
+        characterCollision.mCharacters.clear();
         if (physicsSystem) {
             for (JPH::Constraint* c : jointConstraintByIndex) {
                 if (c != nullptr) {
@@ -471,7 +538,7 @@ struct JoltBackend3D::Impl {
         jobSystem.reset();
         tempAllocator.reset();
 
-        shapeCache.clear();
+        colliderShapes.clear();
         objVsBpFilter.reset();
         objLayerPairFilter.reset();
 
@@ -517,6 +584,91 @@ void JoltBackend3D::pushCollisionEvent(const CollisionEvent& ev) {
     ++_collisionEventCount;
 }
 
+ColliderHandle JoltBackend3D::colliderFromSubShape(const JPH::BodyID& id, uint32_t subShape) {
+    const auto owner = handleFromBodyId(id);
+    if (!owner) return InvalidColliderHandle;
+    const auto& colliders = _impl->bodyColliders[handleIndex(owner)];
+    if (colliders.empty()) return InvalidColliderHandle;
+    ColliderHandle collider = InvalidColliderHandle;
+    if (colliders.size() == 1) {
+        const auto index = colliders.front();
+        collider = makeHandle(index, _impl->colliderGeneration[index]);
+    } else {
+        JPH::BodyLockRead lock(_impl->physicsSystem->GetBodyLockInterface(), id);
+        if (!lock.Succeeded()) return InvalidColliderHandle;
+        const auto* shape = lock.GetBody().GetShape();
+        if (shape->GetType() != JPH::EShapeType::Compound) return InvalidColliderHandle;
+        const auto* compound = static_cast<const JPH::CompoundShape*>(shape);
+        JPH::SubShapeID path, remainder;
+        path.SetValue(subShape);
+        const auto index = compound->GetSubShapeIndexFromID(path, remainder);
+        if (index >= compound->GetNumSubShapes()) return InvalidColliderHandle;
+        collider = compound->GetSubShape(index).mUserData;
+    }
+    const auto index = handleIndex(collider);
+    if (index == 0 || index >= _impl->maxBodies ||
+        _impl->colliderGeneration[index] != handleGeneration(collider) ||
+        _impl->colliderBodyByIndex[index] != owner) return InvalidColliderHandle;
+    return collider;
+}
+
+RaycastHit JoltBackend3D::castRay(const ayt::math::Ray& input, PhysLayerMask mask) {
+    RaycastHit output{};
+    if (!detail::finiteVector(input.origin) || !detail::finiteVector(input.dir)) return output;
+    const JPH::Vec3 direction(input.dir.x, input.dir.y, input.dir.z);
+    if (!std::isfinite(direction.LengthSq()) || direction.LengthSq() <= 1.0e-16f) return output;
+    float length = kRayCastMaxDistance;
+    const auto ray = makeJoltRayCast(input.origin, input.dir, kRayCastMaxDistance, length);
+    JPH::RayCastResult hit;
+    QueryLayerFilter filter(mask);
+    if (!_impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit, {}, filter)) return output;
+    output.body = handleFromBodyId(hit.mBodyID);
+    output.collider = colliderFromSubShape(hit.mBodyID, hit.mSubShapeID2.GetValue());
+    if (!output.body || !output.collider) return {};
+    const auto point = ray.GetPointOnRay(hit.mFraction);
+    JPH::BodyLockRead lock(_impl->physicsSystem->GetBodyLockInterface(), hit.mBodyID);
+    if (!lock.Succeeded()) return {};
+    const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, point);
+    output.hit = true;
+    output.point = {static_cast<float>(point.GetX()), static_cast<float>(point.GetY()),
+                    static_cast<float>(point.GetZ())};
+    output.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+    output.distance = hit.mFraction * length;
+    return output;
+}
+
+void JoltBackend3D::updateCharacters(float dt) {
+    for (auto& record : _impl->characters) {
+        if (!record) continue;
+        auto& character = *record->controller;
+        CharacterBodyFilter filter(record->desc);
+        QueryLayerFilter layers(record->desc.collideMask);
+        if (record->needsRefresh) {
+            character.RefreshContacts({}, layers, filter, {}, *_impl->tempAllocator);
+            record->needsRefresh = false;
+        }
+        character.UpdateGroundVelocity();
+        const auto groundVelocity = character.GetGroundVelocity();
+        const auto oldVelocity = character.GetLinearVelocity();
+        JPH::Vec3 velocity(record->input.horizontalVelocity.x, oldVelocity.GetY(),
+                           record->input.horizontalVelocity.z);
+        if (character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround &&
+            oldVelocity.GetY() - groundVelocity.GetY() <= 0.1f) {
+            velocity = JPH::Vec3(record->input.horizontalVelocity.x, 0,
+                                 record->input.horizontalVelocity.z) + groundVelocity;
+            velocity += JPH::Vec3(0, record->input.jumpSpeed, 0);
+        }
+        record->input.jumpSpeed = 0; // Never repeats on landing or airborne input.
+        const JPH::Vec3 gravity(0, _gravity.y * record->desc.gravityScale, 0);
+        velocity += gravity * dt;
+        character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
+        JPH::CharacterVirtual::ExtendedUpdateSettings settings;
+        settings.mWalkStairsStepUp = JPH::Vec3(0, record->desc.maxStepHeight, 0);
+        settings.mStickToFloorStepDown = JPH::Vec3(0, -record->desc.groundSnapDistance, 0);
+        character.ExtendedUpdate(dt, gravity, settings, {}, layers, filter, {}, *_impl->tempAllocator);
+    }
+}
+
 // =============================================================================
 // Lifecycle
 // =============================================================================
@@ -535,6 +687,10 @@ bool JoltBackend3D::init3D(const PhysicsBackendDescriptor& desc) {
     _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
     _impl->colliderGeneration.assign(maxBodies, 0u);
     _impl->colliderBodyByIndex.assign(maxBodies, 0u);
+    _impl->colliderShapes.resize(maxBodies);
+    _impl->colliderTriggers.assign(maxBodies, false);
+    _impl->bodyColliders.resize(maxBodies);
+    _impl->characters.resize(maxBodies);
     _impl->jointGeneration.assign(maxBodies, 0u);
     _impl->jointBodyA.assign(maxBodies, JPH::BodyID());
     _impl->jointBodyB.assign(maxBodies, JPH::BodyID());
@@ -622,6 +778,7 @@ void JoltBackend3D::step(float deltaTime) {
     _impl->physicsSystem->Update(dt, /*collisionSteps*/ 1,
                                  _impl->tempAllocator.get(),
                                  _impl->jobSystem.get());
+    updateCharacters(dt);
 }
 
 // =============================================================================
@@ -633,6 +790,33 @@ void JoltBackend3D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
 
     outSnapshot.transforms.clear();
     outSnapshot.transforms.reserve(_impl->physicsSystem->GetNumBodies());
+    outSnapshot.characters.clear();
+    for (const auto& record : _impl->characters) {
+        if (!record) continue;
+        const auto& character = *record->controller;
+        CharacterController3DState state;
+        state.character = record->handle;
+        const auto position = character.GetPosition();
+        const auto velocity = character.GetLinearVelocity();
+        const auto normal = character.GetGroundNormal();
+        const auto groundVelocity = character.GetGroundVelocity();
+        state.position = {static_cast<float>(position.GetX()), static_cast<float>(position.GetY()),
+                           static_cast<float>(position.GetZ())};
+        state.linearVelocity = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
+        state.groundNormal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+        state.groundVelocity = {groundVelocity.GetX(), groundVelocity.GetY(), groundVelocity.GetZ()};
+        switch (character.GetGroundState()) {
+        case JPH::CharacterBase::EGroundState::OnGround: state.groundState = CharacterGroundState3D::OnGround; break;
+        case JPH::CharacterBase::EGroundState::OnSteepGround: state.groundState = CharacterGroundState3D::OnSteepGround; break;
+        case JPH::CharacterBase::EGroundState::NotSupported: state.groundState = CharacterGroundState3D::NotSupported; break;
+        case JPH::CharacterBase::EGroundState::InAir: state.groundState = CharacterGroundState3D::InAir; break;
+        }
+        const auto groundId = character.GetGroundBodyID();
+        state.groundBody = handleFromBodyId(groundId);
+        if (state.groundBody)
+            state.groundCollider = colliderFromSubShape(groundId, character.GetGroundSubShapeID().GetValue());
+        outSnapshot.characters.push_back(state);
+    }
 
     auto emitBody = [&](JPH::BodyID id) {
         JPH::BodyLockRead lock(bli, id);
@@ -704,6 +888,66 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
     case CT::Step:
         return;
 
+    case CT::CreateCharacter: {
+        const auto index = handleIndex(cmd.character);
+        if (!createPayload || !detail::validCharacterHandle(cmd.character) ||
+            index >= _impl->maxBodies || _impl->characters[index]) { ++_notFoundCount; return; }
+        const auto& desc = createPayload->characterDesc;
+        if (!detail::validCharacterDesc(desc)) { ++_invalidParamCount; return; }
+        JPH::CapsuleShapeSettings capsule(desc.height*0.5f - desc.radius, desc.radius);
+        const auto capsuleResult = capsule.Create();
+        if (!capsuleResult.IsValid()) { ++_invalidParamCount; return; }
+        JPH::RotatedTranslatedShapeSettings feetShape(JPH::Vec3(0, desc.height*0.5f, 0),
+            JPH::Quat::sIdentity(), capsuleResult.Get());
+        const auto shape = feetShape.Create();
+        if (!shape.IsValid()) { ++_invalidParamCount; return; }
+        auto record = std::make_unique<CharacterRecord>();
+        record->handle = cmd.character;
+        record->desc = desc;
+        JPH::CharacterVirtualSettings settings;
+        settings.mShape = shape.Get();
+        settings.mMaxSlopeAngle = JPH::DegreesToRadians(desc.maxSlopeDegrees);
+        settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -desc.radius);
+        settings.mMass = desc.mass;
+        settings.mMaxStrength = desc.maxPushStrength;
+        settings.mEnhancedInternalEdgeRemoval = true;
+        record->controller = new JPH::CharacterVirtual(&settings,
+            JPH::RVec3(desc.position.x, desc.position.y, desc.position.z), JPH::Quat::sIdentity(),
+            (static_cast<uint64_t>(desc.layer) << 32) | desc.collideMask, _impl->physicsSystem.get());
+        record->controller->SetListener(record.get());
+        record->controller->SetCharacterVsCharacterCollision(&_impl->characterCollision);
+        _impl->characterCollision.Add(record->controller.GetPtr());
+        _impl->characters[index] = std::move(record);
+        return;
+    }
+    case CT::DestroyCharacter:
+    case CT::SetCharacterInput:
+    case CT::TeleportCharacter: {
+        const auto index = handleIndex(cmd.character);
+        if (!detail::validCharacterHandle(cmd.character) || index >= _impl->maxBodies ||
+            !_impl->characters[index] || _impl->characters[index]->handle != cmd.character) {
+            ++_notFoundCount; return;
+        }
+        auto& record = *_impl->characters[index];
+        if (cmd.type == CT::DestroyCharacter) {
+            _impl->characterCollision.Remove(record.controller.GetPtr());
+            _impl->characters[index].reset();
+            for (auto& other : _impl->characters) if (other) other->needsRefresh = true;
+        } else if (cmd.type == CT::SetCharacterInput) {
+            CharacterController3DInput input{{cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z}, cmd.u.vec4.w};
+            if (!detail::validCharacterInput(input)) { ++_invalidParamCount; return; }
+            record.input = input;
+        } else {
+            const ayt::math::FVector3 position{cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z};
+            if (!detail::finiteVector(position)) { ++_invalidParamCount; return; }
+            record.controller->SetPosition(JPH::RVec3(position.x, position.y, position.z));
+            record.controller->SetLinearVelocity(JPH::Vec3::sZero());
+            record.input = {};
+            record.needsRefresh = true;
+        }
+        return;
+    }
+
     case CT::CreateRigidbody: {
         if (!createPayload) { ++_notFoundCount; return; }
         const RigidbodyDesc& d = createPayload->rigidDesc;
@@ -735,8 +979,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
                                             : JPH::EMotionQuality::Discrete;
         bcs.mAllowSleeping   = true;
 
-        JPH::RefConst<JPH::Shape> placeholder =
-            makePlaceholderShape(_impl->shapeCache);
+        JPH::RefConst<JPH::Shape> placeholder = makePlaceholderShape();
         if (placeholder == nullptr) {
             ++_notFoundCount;
             return;
@@ -777,6 +1020,13 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         _impl->bodyIdByIndex[idx]  = JPH::BodyID();
         _impl->bodyLayer[idx]       = 0u;
         _impl->bodyCollideMask[idx] = 0xFFFFFFFFu;
+        for (auto colliderIdx : _impl->bodyColliders[idx]) {
+            _impl->colliderGeneration[colliderIdx] = 0;
+            _impl->colliderBodyByIndex[colliderIdx] = InvalidBodyHandle;
+            _impl->colliderShapes[colliderIdx] = nullptr;
+        }
+        _impl->bodyColliders[idx].clear();
+        for (auto& character : _impl->characters) if (character) character->needsRefresh = true;
         auto it = std::find(_impl->alwaysSyncSet.begin(), _impl->alwaysSyncSet.end(), idx);
         if (it != _impl->alwaysSyncSet.end()) _impl->alwaysSyncSet.erase(it);
         return;
@@ -851,11 +1101,24 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             }
         }
 
-        _impl->shapeCache.push_back(shape);
-        bi.SetShape(bodyId, shape.GetPtr(), /*inUpdateMassProperties*/ false,
-                    JPH::EActivation::Activate);
+        auto& colliders = _impl->bodyColliders[bodyIdx];
+        // Jolt sensor/material properties are body-wide. Mixed sensors need
+        // separate bodies; reject without replacing the existing shape set.
+        if (!colliders.empty() && _impl->colliderTriggers[colliders.front()] != d.isTrigger) {
+            ++_notFoundCount; return;
+        }
         _impl->colliderGeneration[idx] = static_cast<uint16_t>(handleGeneration(cmd.collider));
-        _impl->colliderBodyByIndex[idx] = static_cast<uint16_t>(bodyIdx);
+        _impl->colliderBodyByIndex[idx] = d.body;
+        _impl->colliderShapes[idx] = shape;
+        _impl->colliderTriggers[idx] = d.isTrigger;
+        colliders.push_back(idx);
+        if (!_impl->rebuildBodyShape(bodyIdx)) {
+            colliders.pop_back();
+            _impl->colliderGeneration[idx] = 0;
+            _impl->colliderBodyByIndex[idx] = InvalidBodyHandle;
+            _impl->colliderShapes[idx] = nullptr;
+            ++_notFoundCount;
+        }
         return;
     }
 
@@ -863,8 +1126,20 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         const uint32_t idx = handleIndex(cmd.collider);
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
         if (_impl->colliderGeneration[idx] != handleGeneration(cmd.collider)) { ++_notFoundCount; return; }
+        const auto owner = _impl->colliderBodyByIndex[idx];
+        const auto bodyIdx = handleIndex(owner);
+        if (bodyIdx == 0 || _impl->bodyGeneration[bodyIdx] != handleGeneration(owner)) {
+            ++_notFoundCount; return;
+        }
+        auto& colliders = _impl->bodyColliders[bodyIdx];
+        auto oldColliders = colliders;
+        colliders.erase(std::remove(colliders.begin(), colliders.end(), idx), colliders.end());
+        if (!_impl->rebuildBodyShape(bodyIdx)) {
+            colliders = std::move(oldColliders); ++_notFoundCount; return;
+        }
         _impl->colliderGeneration[idx] = 0u;
-        _impl->colliderBodyByIndex[idx] = 0u;
+        _impl->colliderBodyByIndex[idx] = InvalidBodyHandle;
+        _impl->colliderShapes[idx] = nullptr;
         return;
     }
 
@@ -951,29 +1226,15 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
     }
 
     case CT::RaycastAsync: {
-        float rayLength = kRayCastMaxDistance;
-        const ayt::math::FVector3 origin(cmd.u.ray.ox, cmd.u.ray.oy, cmd.u.ray.oz);
-        const ayt::math::FVector3 dir(cmd.u.ray.dx, cmd.u.ray.dy, cmd.u.ray.dz);
-        const JPH::RRayCast ray = makeJoltRayCast(origin, dir, kRayCastMaxDistance, rayLength);
-        JPH::RayCastResult hit;
-        const bool didHit = _impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit);
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        if (didHit) {
-            qr.hitCount = 1;
-            RaycastHit& rh = qr.hits.emplace_back();
-            rh.hit      = true;
-            rh.body     = handleFromBodyId(hit.mBodyID);
-            const float worldDist = hit.mFraction * rayLength;
-            rh.point = ayt::math::FVector3(
-                origin.x + dir.x * worldDist,
-                origin.y + dir.y * worldDist,
-                origin.z + dir.z * worldDist);
-            rh.normal   = ayt::math::FVector3(-dir.x, -dir.y, -dir.z);
-            rh.distance = worldDist;
-        }
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(qr));
+        ayt::math::Ray ray{};
+        ray.origin = {cmd.u.ray.ox, cmd.u.ray.oy, cmd.u.ray.oz};
+        ray.dir = {cmd.u.ray.dx, cmd.u.ray.dy, cmd.u.ray.dz};
+        QueryResult result{};
+        result.queryId = cmd.queryId;
+        const auto hit = castRay(ray, cmd.layerMask);
+        if (hit.hit) { result.hitCount = 1; result.hits.push_back(hit); }
+        std::lock_guard<std::mutex> lock(_impl->asyncQueryMu);
+        _impl->asyncQueryQueue.push_back(std::move(result));
         return;
     }
 
@@ -1155,8 +1416,10 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             ++_invalidParamCount;
             return;
         }
-        const uint32_t idx = _impl->colliderBodyByIndex[cIdx];
+        const auto owner = _impl->colliderBodyByIndex[cIdx];
+        const uint32_t idx = handleIndex(owner);
         if (idx == 0u || idx >= _impl->maxBodies) { ++_notFoundCount; return; }
+        if (_impl->bodyGeneration[idx] != handleGeneration(owner)) { ++_notFoundCount; return; }
         const JPH::BodyID id = _impl->bodyIdByIndex[idx];
         if (id.IsInvalid()) { ++_notFoundCount; return; }
         const bool ok = withBody(bli, id, [&](JPH::Body& body) {
@@ -1189,22 +1452,14 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
 
     switch (request.type) {
     case SyncQueryType::Raycast: {
-        float rayLength = kRayCastMaxDistance;
-        const JPH::RRayCast ray = makeJoltRayCast(
-            request.ray.origin, request.ray.dir, kRayCastMaxDistance, rayLength);
-        JPH::RayCastResult hit;
-        if (_impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit)) {
-            outResponse.firstHit.hit  = true;
-            outResponse.firstHit.body = handleFromBodyId(hit.mBodyID);
-            const float worldDist = hit.mFraction * rayLength;
-            outResponse.firstHit.point = ayt::math::FVector3(
-                request.ray.origin.x + request.ray.dir.x * worldDist,
-                request.ray.origin.y + request.ray.dir.y * worldDist,
-                request.ray.origin.z + request.ray.dir.z * worldDist);
-            outResponse.firstHit.normal = ayt::math::FVector3(
-                -request.ray.dir.x, -request.ray.dir.y, -request.ray.dir.z);
-            outResponse.firstHit.distance = worldDist;
+        outResponse.firstHit = {};
+        const auto& ray = request.ray;
+        const float lengthSq = ray.dir.x*ray.dir.x + ray.dir.y*ray.dir.y + ray.dir.z*ray.dir.z;
+        if (!detail::finiteVector(ray.origin) || !detail::finiteVector(ray.dir) ||
+            !std::isfinite(lengthSq) || lengthSq <= 1.0e-16f) {
+            outResponse.status = PhysResult::InvalidParam; return;
         }
+        outResponse.firstHit = castRay(ray, request.layerMask);
         return;
     }
     case SyncQueryType::OverlapSphere: {

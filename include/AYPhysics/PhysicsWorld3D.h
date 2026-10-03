@@ -17,6 +17,21 @@ namespace ayt::physics {
 class PhysicsManager;
 class PhysicsWorld3D {
 public:
+    /** Enqueue creation of a physics-thread-owned capsule controller.
+     * Ok acknowledges the queue, not native allocation. After stepAndWait(),
+     * getCharacterState() confirms creation. Null/Mock return Unsupported.
+     * Keep the owning manager alive; handles belong to this world only. */
+    PhysResult createCharacter(const CharacterController3DDesc& desc, CharacterHandle& outHandle);
+    /// Enqueue removal and immediately invalidate the game handle. Native removal
+    /// and snapshot cleanup complete at the next step; reuse bumps slot generation.
+    PhysResult destroyCharacter(CharacterHandle h);
+    /// Submit before FixedPhysics; planar velocity persists, jump is consumed once.
+    PhysResult setCharacterInput(CharacterHandle h, const CharacterController3DInput& input);
+    /// Teleport feet, clear velocity/input, and refresh contacts at the next step.
+    PhysResult teleportCharacter(CharacterHandle h, const ayt::math::FVector3& feet);
+    /// Copy the latest completed-step state; NotFound before creation/after removal.
+    PhysResult getCharacterState(CharacterHandle h, CharacterController3DState& outState);
+
     PhysResult createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle);
     PhysResult    destroyRigidbody(BodyHandle h);
     PhysResult    setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p, const ayt::math::FQuaternion& r);
@@ -38,6 +53,8 @@ public:
     // handle resolves to its owning body and sets it there.
     PhysResult    setMaterial(ColliderHandle h, float friction, float restitution);
 
+    /// Append a collider to this body's compound. Deletion removes its geometry.
+    /// Jolt sensor/material properties are body-wide; mixed sensor/solid shapes reject.
     PhysResult    createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult    destroyCollider(ColliderHandle h);
 
@@ -45,12 +62,15 @@ public:
     PhysResult    destroyJoint(JointHandle h);
 
     // Async queries (result in next fetchResults() under returned queryId).
+    /// Deferred ray; exact collider, surface normal and mask semantics match raycastSync.
     uint32_t      raycastAsync(const ayt::math::Ray& ray, PhysLayerMask layerMask = 0xFFFFFFFFu);
     uint32_t      overlapSphereAsync(const ayt::math::FVector3& center, float radius, PhysLayerMask layerMask);
     uint32_t      overlapBoxAsync(const ayt::math::FVector3& center, const ayt::math::FVector3& halfExtents,
                                   const ayt::math::FQuaternion& rot, PhysLayerMask layerMask);
 
     // Sync queries (block game thread on mailbox).
+    /// Wait for a Jolt raycast: exact collider, real surface normal, mask-filtered target.
+    /// Direction must be finite/nonzero; normalized internally, max distance 10000 units.
     PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit, PhysLayerMask layerMask = 0xFFFFFFFFu);
     PhysResult    overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                     std::vector<BodyHandle>& out, PhysLayerMask layerMask);
@@ -75,6 +95,11 @@ private:
     uint32_t _nextColliderGen    = 0;
     uint32_t _nextJointIndex     = 0;
     uint32_t _nextJointGen       = 0;
+    uint32_t _nextCharacterIndex = 0;
+    std::vector<uint16_t> _characterGenerations;
+    std::vector<bool> _characterLive;
+    std::vector<uint32_t> _freeCharacterIndices;
+    bool ownsCharacter(CharacterHandle h) const noexcept;
 
     // Monotonic query id (also game-thread-only — opaque to backend). Must be
     // != 0 (the API contract returns 0 on error).

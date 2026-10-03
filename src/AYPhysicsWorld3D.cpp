@@ -382,6 +382,7 @@ uint32_t PhysicsWorld3D::overlapBoxAsync(const ayt::math::FVector3& center,
 
 PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                                        PhysLayerMask layerMask) {
+    outHit = {};
     PhysicsManager* m = _manager;
     if (!m || !m->syncMailbox()) return PhysResult::InvalidState;
     SyncQueryRequest req{};

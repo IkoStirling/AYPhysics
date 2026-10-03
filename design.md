@@ -3,7 +3,25 @@
 > **Status:** v0.5 (2026-07-31) — R1 + R1.5a + R1.5b + R1.5c shipped; R2.0a (ConvexHull + TriangleMesh + Heightfield shapes) next
 > **Backend:** Jolt 3D (locked, real impl via vcpkg `jolt-physics` 5.5.0) + Box2D 2D (locked, R2.5 parallel)
 
-Box2D raycasts retain the exact collider handle in `RaycastHit::collider`. Shape user data stores the packed collider handle and query resolution verifies its generation and current shape ID; a stale shape never supplies a valid part identity. Overlap queries still return body identities. Jolt/other backends currently leave the collider field invalid.
+Box2D and Jolt raycasts retain exact collider handles in `RaycastHit::collider`.
+Jolt now owns per-body collider lists and rebuilds tagged compounds on add/remove;
+compound child user data carries the complete handle, including generation.
+Resolution checks the collider generation and its full owner-body identity.
+Ray point/normal/distance and layer masks are consistent in sync/async paths.
+Overlap APIs remain body-only. Empty bodies use `EmptyShape`; collider shapes
+are retained by live colliders/native bodies, not a destruction-time cache.
+
+**2026-10-03 controller extension:** `PhysicsWorld3D` queues create/destroy/input/
+teleport commands; the descriptor remains out of band in `PhysicsCreatePool`
+and the compact command stays <= 64 bytes. `CharacterVirtual` and its contact/
+mask helpers remain entirely in `JoltBackend3D.cpp`. Each physics step first
+updates rigid bodies, then advances live controllers with ground velocity,
+gravity, steep-slope cancellation and ExtendedUpdate stairs/snap. Structural
+collider/body changes force contact refresh before using cached subshape paths.
+Controller snapshots are owned values and reset with the double buffer.
+Facade slots recycle after a successful FIFO destroy enqueue with per-slot
+generation bumps; stale commands cannot mutate a replacement. Controllers are
+destroyed before PhysicsSystem. See [the full contract](docs/character-controller-3d.md).
 > **Authority:** this file is the source of truth for AYPhysics architecture.
 > **Related:** [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B dual paths.
 

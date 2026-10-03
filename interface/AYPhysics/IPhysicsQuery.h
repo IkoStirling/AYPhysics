@@ -22,6 +22,12 @@ public:
     /// False until a PhysicsManager is attached and ready.
     virtual bool isReady() const = 0;
 
+    /** Query on the game thread; waits for the physics-thread mailbox.
+     * Jolt returns the exact generation-checked collider within a compound,
+     * world-space surface normal and distance (up to 10000 world units).
+     * A successful no-hit has hit=false. Finite nonzero direction is required;
+     * the backend normalizes it. layerMask filters targets, not their collide masks.
+     * Returned handles belong to this manager and expire on collider/body destruction. */
     virtual PhysResult raycastSync(const ayt::math::Ray& ray,
                                    RaycastHit& outHit,
                                    PhysLayerMask layerMask = 0xFFFFFFFFu) = 0;

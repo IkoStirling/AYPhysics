@@ -51,6 +51,10 @@ enum class PhysicsCommandType : uint8_t {
     SetMass               = 21,  // R10: runtime mass override (vec4.x = mass)
     SetMaterial           = 22,  // R10: runtime friction/restitution override
                                   //      (vec4.x = friction, vec4.y = restitution; collider-scoped)
+    CreateCharacter       = 23,
+    DestroyCharacter      = 24,
+    SetCharacterInput     = 25,
+    TeleportCharacter     = 26,
 };
 
 using CreateSlotId = uint32_t;
@@ -58,10 +62,11 @@ constexpr CreateSlotId InvalidCreateSlotId = 0;
 
 // Out-of-band create payload (§5.2). Game allocates, physics consumes + frees slot.
 struct PhysicsCreatePayload {
-    enum class Kind : uint8_t { Rigidbody = 0, Collider = 1, Joint = 2 } kind = Kind::Rigidbody;
+    enum class Kind : uint8_t { Rigidbody = 0, Collider = 1, Joint = 2, Character = 3 } kind = Kind::Rigidbody;
     RigidbodyDesc rigidDesc{};
     ColliderDesc  colliderDesc{};
     JointDesc     jointDesc{};
+    CharacterController3DDesc characterDesc{};
 };
 
 // Compact PhysicsCommand (§5.2). No descriptor copies; create uses CreateSlotId.
@@ -73,6 +78,7 @@ struct PhysicsCommand {
     CreateSlotId       createSlot = InvalidCreateSlotId;
     uint32_t           queryId    = 0;
     uint32_t           layerMask  = 0xFFFFFFFFu;
+    CharacterHandle    character = InvalidCharacterHandle;
 
     union {
         struct {

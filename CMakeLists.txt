@@ -15,6 +15,7 @@ set(SRC_FILES
     src/AYPhysicsCommandQueue.cpp
     src/AYPhysicsManager.cpp
     src/AYPhysicsWorld3D.cpp
+    src/AYCharacterController3D.cpp
     src/AYPhysicsWorld2D.cpp
     src/AYPhysicsSubSystem.cpp
     src/AYPhysicsRuntimeModule.cpp
@@ -29,6 +30,7 @@ set(SRC_FILES
 set(HEAD_FILES
     AYPhysics.h
     include/AYPhysics/PhysicsHandles.h
+    include/AYPhysics/CharacterController3D.h
     include/AYPhysics/PhysicsTypes.h
     include/AYPhysics/PhysicsCommandQueue.h
     include/AYPhysics/PhysicsManager.h

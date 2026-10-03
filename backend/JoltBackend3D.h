@@ -41,6 +41,7 @@ public:
                       SyncQueryResponse& outResponse) override;
     PhysicsBackendInfo describe() const override;
     bool  isRealDevice() const override { return true; }
+    bool supportsCharacterControllers() const override { return true; }
 
     // Diagnostics (mirrors NullBackend3D; expanded in R1.5b).
     uint64_t stepCount()             const noexcept { return _stepCount; }
@@ -81,6 +82,9 @@ public:
     PhysResult execute_destroyColliderForTest(ColliderHandle h);
 
 private:
+    ColliderHandle colliderFromSubShape(const JPH::BodyID& id, uint32_t subShape);
+    RaycastHit castRay(const ayt::math::Ray& ray, PhysLayerMask mask);
+    void updateCharacters(float dt);
     struct Impl;
     std::unique_ptr<Impl> _impl;
 

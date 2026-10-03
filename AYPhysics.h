@@ -2,6 +2,7 @@
 // AYPhysics.h v0.4.0 - umbrella include for AYPhysics (Jolt 3D + Box2D 2D + Box2DBridge 2D)
 
 #include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/CharacterController3D.h"
 #include "AYPhysics/PhysicsHandles.h"
 #include "AYPhysics/PhysicsCommandQueue.h"
 #include "AYPhysics/PhysicsWorld3D.h"

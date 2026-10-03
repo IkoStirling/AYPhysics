@@ -17,10 +17,12 @@ namespace ayt::physics {
 using BodyHandle     = uint32_t;
 using ColliderHandle = uint32_t;
 using JointHandle    = uint32_t;
+using CharacterHandle = uint32_t; // Independent world-local namespace.
 
 constexpr BodyHandle     InvalidBodyHandle     = 0;
 constexpr ColliderHandle InvalidColliderHandle = 0;
 constexpr JointHandle    InvalidJointHandle    = 0;
+constexpr CharacterHandle InvalidCharacterHandle = 0;
 
 constexpr uint32_t kPhysHandleIndexBits = 20;
 constexpr uint32_t kPhysHandleGenBits   = 12;
