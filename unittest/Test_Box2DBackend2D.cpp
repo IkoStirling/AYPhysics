@@ -872,26 +872,34 @@ TEST_SUITE(Box2DBackend2DTests)
         rb.fixedRotation = false;
         rb.alwaysSync = true;
         rb.angularDamping = 0.0f;
-        w->createRigidbody(rb, h);
+        CHECK(w->createRigidbody(rb, h) == PhysResult::Ok);
         ColliderDesc cd{};
         cd.body = h; cd.shape = ColliderShape::Box;
         cd.halfExtents = ayt::math::FVector3(0.5f, 0.5f, 0.0f);
-        ColliderHandle c; w->createCollider(cd, c); (void)c;
-        waitForDrain2D(*mgr, 200);
+        ColliderHandle c = InvalidColliderHandle;
+        CHECK(w->createCollider(cd, c) == PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
 
-        for (int i = 0; i < 90; ++i) {
+        // Complete each step before applying the next torque. A final wrapped
+        // orientation after many revolutions cannot prove that a body did not spin.
+        float previousAngularVelocity = 0.0f;
+        float angle = 0.0f;
+        for (int i = 0; i < 12; ++i) {
             CHECK_INT_EQ(static_cast<uint32_t>(w->applyTorque(h, 8.0f)),
                          static_cast<uint32_t>(PhysResult::Ok));
-            mgr->step(1.0f / 60.0f);
-        }
-        waitForDrain2D(*mgr, 300);
-        const PhysFrameSnapshot snap = mgr->fetchResults();
-        float angle = 0.0f;
-        for (const BodyTransform& bt : snap.transforms) {
-            if (bt.body == h)
+            CHECK(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+            bool foundBody = false;
+            for (const BodyTransform& bt : mgr->fetchResults().transforms) {
+                if (bt.body != h) continue;
+                foundBody = true;
+                CHECK(bt.angularVelocity.z > previousAngularVelocity);
+                previousAngularVelocity = bt.angularVelocity.z;
                 angle = 2.0f * std::atan2(bt.rotation.z, bt.rotation.w);
+            }
+            CHECK(foundBody);
         }
-        CHECK(std::fabs(angle) > 0.5f);
+        CHECK(angle > 0.5f);
+        CHECK(angle < 2.0f);
         mgr->shutdown();
     }
 

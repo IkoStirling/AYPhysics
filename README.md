@@ -18,6 +18,9 @@ lifecycle, failure behavior and limits. The older phase table below is historica
 - **3D backend:** Jolt (locked, real impl via vcpkg `jolt-physics` 5.5.0); see design §4.1
 - **2D backend:** Box2D 3.x flat-API (locked, R2.5 parallel); see design §4.2 (legacy Box2D 2.4 OO style forbidden)
 
+扭矩回归通过 `stepAndWait` 逐步完成固定步，核对每步角速度增长、快照包含刚体，
+以及转过整圈前的明确转角；不以多圈旋转后的包裹朝向判断是否发生旋转。
+
 ---
 
 ## Status
