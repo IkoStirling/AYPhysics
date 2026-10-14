@@ -1018,6 +1018,7 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
     }
 
     switch (request.type) {
+    case SyncQueryType::SphereSweep: outResponse.status = PhysResult::Unsupported; return;
     case SyncQueryType::Raycast: {
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);

@@ -35,7 +35,7 @@ void MockBackend3D::execute(const PhysicsCommand& cmd,
 void MockBackend3D::executeSync(const SyncQueryRequest& request,
                                 SyncQueryResponse& outResponse) {
     outResponse.requestId = request.requestId;
-    outResponse.status    = PhysResult::Ok;
+    outResponse.status = request.type == SyncQueryType::SphereSweep ? PhysResult::Unsupported : PhysResult::Ok;
     outResponse.firstHit.hit = false;
 }
 

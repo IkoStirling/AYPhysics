@@ -43,7 +43,7 @@ void NullBackend3D::execute(const PhysicsCommand& /*cmd*/,
 void NullBackend3D::executeSync(const SyncQueryRequest& request,
                                 SyncQueryResponse& outResponse) {
     outResponse.requestId = request.requestId;
-    outResponse.status    = PhysResult::Ok;
+    outResponse.status = request.type == SyncQueryType::SphereSweep ? PhysResult::Unsupported : PhysResult::Ok;
     // hits remain default (RaycastHit{hit=false}); overlaps empty.
 }
 

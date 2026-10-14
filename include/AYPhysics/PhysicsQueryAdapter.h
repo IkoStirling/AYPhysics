@@ -19,6 +19,8 @@ public:
                            RaycastHit& outHit,
                            PhysLayerMask layerMask) override;
 
+    PhysResult sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit) override;
+
     PhysResult overlapSphereSync(const ayt::math::FVector3& center,
                                  float radius,
                                  std::vector<BodyHandle>& out,

@@ -21,6 +21,11 @@ PhysResult PhysicsQueryAdapter::raycastSync(const ayt::math::Ray& ray,
     return _manager->world3D()->raycastSync(ray, outHit, layerMask);
 }
 
+PhysResult PhysicsQueryAdapter::sphereSweepSync(const SphereSweep& sweep, RaycastHit& hit) {
+    hit = {};
+    if (!isReady()) return PhysResult::InvalidState;
+    return _manager->world3D()->sphereSweepSync(sweep,hit);
+}
 PhysResult PhysicsQueryAdapter::overlapSphereSync(const ayt::math::FVector3& center,
                                                   float radius,
                                                   std::vector<BodyHandle>& out,

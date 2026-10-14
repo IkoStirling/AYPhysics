@@ -72,6 +72,10 @@ public:
     /// Wait for a Jolt raycast: exact collider, real surface normal, mask-filtered target.
     /// Direction must be finite/nonzero; normalized internally, max distance 10000 units.
     PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit, PhysLayerMask layerMask = 0xFFFFFFFFu);
+    /// Finite sphere sweep via the sync mailbox; exact collider and CENTER travel distance.
+    /// Zero travel/invalid bounds are rejected. Initial penetration gives distance 0.
+    /// Null/Mock return Unsupported; only a successful query returns a hit/no-hit result.
+    PhysResult sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit);
     PhysResult    overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                     std::vector<BodyHandle>& out, PhysLayerMask layerMask);
 
