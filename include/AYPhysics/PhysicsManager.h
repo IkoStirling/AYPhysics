@@ -8,6 +8,7 @@
 
 #include "AYPhysics/PhysicsTypes.h"
 #include "AYPhysics/PhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsDebugDraw.h"
 #include <AYPlatform/ConditionVariable.h>
 #include <AYPlatform/Mutex.h>
 #include <AYTime/Duration.h>
@@ -60,6 +61,10 @@ public:
     // Game-thread read of the latest sparse snapshot. Reference valid until next call.
     const PhysFrameSnapshot& fetchResults();
 
+    /// Borrow the game-thread query diagnostic history. Configure to opt in;
+    /// consume in the editor after query completion. No renderer dependency.
+    PhysicsDebugDraw& debugDraw() noexcept { return _debugDraw; }
+
     void shutdown();
 
     // True while the physics thread is alive. F-P2: lets callers distinguish
@@ -87,6 +92,7 @@ private:
     void _physicsThreadMain();
 
     PhysicsBackendDescriptor _descriptor{};
+    PhysicsDebugDraw _debugDraw;
     std::unique_ptr<PhysicsWorld3D> _world3D;
     std::unique_ptr<PhysicsWorld2D> _world2D;
     std::unique_ptr<IPhysicsBackend3D> _backend3D;

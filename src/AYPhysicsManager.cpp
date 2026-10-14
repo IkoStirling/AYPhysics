@@ -231,6 +231,7 @@ void PhysicsManager::publishSnapshot() {
 
 void PhysicsManager::shutdown() {
     if (!_running.exchange(false, std::memory_order_acq_rel)) return;
+    _debugDraw.clear();
     _stepCompletionCv.notifyAll();
     if (_physicsThread.joinable()) _physicsThread.join();
     if (_backend3D) _backend3D->stop();

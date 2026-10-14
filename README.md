@@ -147,3 +147,26 @@ Current public layout: `interface/AYPhysics/`, `include/AYPhysics/`, `backend/{N
 | 2026-07-20 | **R0** — industrial-grade design rewrite: 16-chapter structure (Goals/Non-Goals/Anti-Goals, decisions, threading, backend abstraction, handles, determinism, effects-as-contracts); companion CLAUDE.md + README.md |
 | 2026-07-09 | Original dual-path summary (now design.md §10) |
 | Earlier | Initial rigidbody / cloth / fluid / particle sketch |
+
+## Query debug drawing (2026-10-14)
+
+Configure the manager-owned `PhysicsDebugDraw` on the game thread to opt in.
+Existing synchronous 2D/3D ray/sphere queries and 2D box queries then record their
+actual results: green miss, red hit (point and normal markers), yellow failure.
+Frame entries are consumed once; Timed uses monotonic real time; Persistent
+retains previous drawings until clear/disable/shutdown. Colors and duration are
+configurable. 1024 records / 16384 segments reject new records without evicting
+old history. Drawing/allocation failures never change physics results.
+
+The built-in editor owns consumption and viewport controls. A custom host
+consumes owned lines and passes them to Renderer::setEditorDebugLines with an
+editor pipeline. Physics has no Renderer dependency. Async capture is explicit
+through record; no automatic async/result or deterministic-query instrumentation.
+Tests: PhysicsDebugDrawTests and real JoltColliderHitTests. See
+[SDK contract](../../AYDocs/sdk/contracts/common.md#commonphysicsdebug-draw).
+
+Final local verification: full inventory 139/139 passed (0 skipped/problems/
+unreported), including extreme finite direction normalization and 2D XY projection.
+Report: `out/physics-debug-20261014/physics-boundary-final/9d70c1701f8e4af69f3af0737ab678f2/cases.json`.
+The earlier 138-case full report remains historical; the initial sandbox PDB
+compile failure and intermediate inventory/build diagnostics are not passing gates.

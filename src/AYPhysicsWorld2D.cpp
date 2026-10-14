@@ -270,6 +270,9 @@ PhysResult PhysicsWorld2D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
                                        PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
     if (!m || !m->syncMailbox2D()) return PhysResult::InvalidState;
+    PhysicsDebugQuery debug; debug.type = SyncQueryType::Raycast;
+    debug.dimension = PhysicsDimension::TwoD;
+    debug.ray = ray;
     SyncQueryRequest req{};
     req.type = SyncQueryType::Raycast;
     req.requestId = nextQueryId();
@@ -277,9 +280,11 @@ PhysResult PhysicsWorld2D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     req.ray = ray;
     SyncQueryResponse resp{};
     if (!m->syncMailbox2D()->submitAndWait(req, resp, 1000 * 1000)) {
+        (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
     outHit = resp.firstHit;
+    (void)m->debugDraw().record(debug, resp.status, outHit.hit, &outHit);
     return resp.status;
 }
 
@@ -287,6 +292,9 @@ PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, 
                                              std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
     if (!m || !m->syncMailbox2D()) return PhysResult::InvalidState;
+    PhysicsDebugQuery debug; debug.type = SyncQueryType::OverlapSphere;
+    debug.dimension = PhysicsDimension::TwoD;
+    debug.center = center; debug.radius = radius;
     SyncQueryRequest req{};
     req.type = SyncQueryType::OverlapSphere;
     req.requestId = nextQueryId();
@@ -295,9 +303,11 @@ PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, 
     req.sphereRadius = radius;
     SyncQueryResponse resp{};
     if (!m->syncMailbox2D()->submitAndWait(req, resp, 1000 * 1000)) {
+        (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
     out = resp.overlaps;
+    (void)m->debugDraw().record(debug, resp.status, !out.empty());
     return resp.status;
 }
 
@@ -306,6 +316,9 @@ PhysResult PhysicsWorld2D::overlapBoxSync(const ayt::math::FVector3& center,
                                           std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
     if (!m || !m->syncMailbox2D()) return PhysResult::InvalidState;
+    PhysicsDebugQuery debug; debug.type = SyncQueryType::OverlapBox;
+    debug.dimension = PhysicsDimension::TwoD;
+    debug.center = center; debug.halfExtents = halfExtents;
     SyncQueryRequest req{};
     req.type = SyncQueryType::OverlapBox;
     req.requestId = nextQueryId();
@@ -314,9 +327,11 @@ PhysResult PhysicsWorld2D::overlapBoxSync(const ayt::math::FVector3& center,
     req.boxHalfExtents = halfExtents;
     SyncQueryResponse resp{};
     if (!m->syncMailbox2D()->submitAndWait(req, resp, 1000 * 1000)) {
+        (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
     out = resp.overlaps;
+    (void)m->debugDraw().record(debug, resp.status, !out.empty());
     return resp.status;
 }
 

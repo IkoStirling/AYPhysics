@@ -5,6 +5,7 @@ project(AYPhysics_Tests)
 set(TEST_TARGET AYPhysics_Tests)
 
 add_executable(${TEST_TARGET}
+    Test_PhysicsDebugDraw.cpp
     main.cpp
     Test_PhysicsTypes.cpp
     Test_PhysicsHandles.cpp
@@ -78,7 +79,7 @@ endif()
 
 ay_add_test_tiers(${TEST_TARGET} PREFIX physics DEFAULT_TIER integration
     FAST_SUITES PhysicsTypesTests PhysicsHandlesTests PhysicsCommandQueueTests
-                PhysicsSnapshotTests NullBackend3DTests
+                PhysicsSnapshotTests NullBackend3DTests PhysicsDebugDrawTests
     TIMEOUT 180 RUN_SERIAL)
 # Record resolved (not merely requested/cache) backend configuration for audits.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-features.json"

@@ -11,6 +11,7 @@ set(MODULE_NAME AYPhysics)
 # =============================================================================
 
 set(SRC_FILES
+    src/AYPhysicsDebugDraw.cpp
     src/AYPhysicsTypes.cpp
     src/AYPhysicsCommandQueue.cpp
     src/AYPhysicsManager.cpp

@@ -44,6 +44,7 @@ public:
 
     /**
      * @brief Blocks for the closest 2D physics hit along a ray.
+     * @note Configured manager debugDraw records the actual completed query.
      * @param ray Query origin and direction; Box2D evaluates the XY plane.
      * @param outHit Receives the completed response. On PhysResult::Ok, inspect
      * RaycastHit::hit to distinguish a miss from a collision.

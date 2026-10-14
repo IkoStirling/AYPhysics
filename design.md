@@ -1279,3 +1279,30 @@ PR description must tick:
 | Q-P2 | Include velocities in snapshot by default? | **Yes** (`syncVelocitiesInSnapshot=true`); allow descriptor off for bandwidth |
 | Q-P3 | Soft max on `transforms.size()`? | Warn at `maxBodies * 0.9` active; do not truncate silently |
 | Q-P4 | 2D backend perf parity? | Decide with §4.2; Box2D likely single-threaded |
+
+## Query diagnostic history (2026-10-14)
+
+PhysicsManager owns a game-thread PhysicsDebugDraw value service. Synchronous
+world APIs record only after receiving their mailbox response; timeout is an
+error-colored attempted query. No backend access, command wire, frame snapshot,
+simulation state or event semantics change. Capture is disabled by default.
+
+Geometry uses normalized native ray extent 10000, XY for 2D; successful rays
+add hit-point cross and surface-normal segment. Overlap uses the actual query
+box or sphere/circle, never hit-body bounds as a substitute. The service rejects
+malformed geometry and bounds total retained records/segments. Record is noexcept;
+diagnostic allocation failures return NoMemory without affecting query results.
+Timed expiry starts at completion and uses Clock::performanceNowUs, independent
+of gameplay pause/time scale. A time-source function permits exact boundary
+tests without wall-clock sleeps. consumeLines returns an owned copy, then retires
+only Frame records; settings changes do not reinterpret old lifetimes. Disable
+clears all records. Explicit record supports caller-supplied completed results;
+it neither runs nor authenticates another query. Automatic async capture is
+not implemented; the existing 3D box-async stub is not represented as supported
+geometry/query execution.
+
+Shared colliderLines produces Box/Sphere/Capsule wires from descriptor dimensions,
+local offset and body rotation/position, without renderer types or Transform scale.
+Capsule height includes hemispheres, matching both native backends. Editor
+collider enumeration is an ECS authoring/live-pose adapter, not native shape
+snapshot enumeration; advanced shapes and non-ECS bodies are omitted.

@@ -7,6 +7,26 @@ using namespace ayt::physics;
 using namespace ayt::physics::controller_tests;
 TEST_SUITE(JoltColliderHitTests)
 #if defined(AYPHYSICS_HAS_JOLT)
+TEST_CASE(DebugDrawingTracksRealHitsMissesAndLayerFilters) {
+    Scene scene;
+    scene.box({0,0,3},{0.5f,0.5f,0.5f});
+    scene.tick();
+    PhysicsDebugDrawOptions options; options.enabled=true;
+    accepted(scene.manager->debugDraw().configure(options));
+    ayt::math::Ray ray; ray.dir={0,0,2};
+    RaycastHit hit;
+    accepted(scene.world->raycastSync(ray,hit)); CHECK(hit.hit);
+    auto lines=scene.manager->debugDraw().consumeLines();
+    CHECK(lines.size()==5); CHECK(lines.front().color==options.hitColor);
+    CHECK(std::abs(lines[1].from.z-hit.point.z)<0.001f);
+    accepted(scene.world->raycastSync(ray,hit,0)); CHECK(!hit.hit);
+    lines=scene.manager->debugDraw().consumeLines(); CHECK(lines.size()==1);
+    CHECK(lines.front().color==options.missColor);
+    std::vector<BodyHandle> bodies;
+    accepted(scene.world->overlapSphereSync({0,0,3},1,bodies,UINT32_MAX)); CHECK(!bodies.empty());
+    lines=scene.manager->debugDraw().consumeLines(); CHECK(lines.size()==96);
+    CHECK(lines.front().color==options.hitColor);
+}
 TEST_CASE(CompoundRaysReturnDistinctCollidersAndRealNormals) {
     Scene scene;
     RigidbodyDesc desc;

@@ -70,6 +70,7 @@ public:
 
     // Sync queries (block game thread on mailbox).
     /// Wait for a Jolt raycast: exact collider, real surface normal, mask-filtered target.
+    /// Configured manager debugDraw records the actual completed query.
     /// Direction must be finite/nonzero; normalized internally, max distance 10000 units.
     PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit, PhysLayerMask layerMask = 0xFFFFFFFFu);
     PhysResult    overlapSphereSync(const ayt::math::FVector3& center, float radius,
