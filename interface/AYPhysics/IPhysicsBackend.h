@@ -6,6 +6,7 @@
 // types live only in backend/<Xxx>Backend3D.cpp.
 
 #include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsDebugDraw.h"
 #include "AYPhysics/PhysicsCommandQueue.h"
 
 namespace ayt::physics {
@@ -23,6 +24,9 @@ public:
 
     // Snapshot publish (physics thread writes back; manager swaps to front).
     virtual void publishSnapshot(PhysFrameSnapshot& outSnapshot) = 0;
+
+    /// Physics-thread-only, opt-in native geometry including static/sleeping bodies.
+    virtual void appendDebugSnapshot(PhysicsDebugSnapshot&) {}
 
     // Execute one compact command (physics thread; backpressure already handled).
     virtual void execute(const PhysicsCommand& cmd,

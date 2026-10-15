@@ -67,6 +67,7 @@ struct PhysicsCreatePayload {
     ColliderDesc  colliderDesc{};
     JointDesc     jointDesc{};
     CharacterController3DDesc characterDesc{};
+    SyncQueryRequest queryDesc{};
 };
 
 // Compact PhysicsCommand (§5.2). No descriptor copies; create uses CreateSlotId.

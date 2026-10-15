@@ -80,4 +80,21 @@ TEST_CASE(real_world_facades_capture_completed_sync_queries_only_when_enabled) {
     manager->world2D()->overlapBoxSync({},{1,2,0},bodies);
     CHECK(manager->debugDraw().consumeLines().size()==4);
 }
+TEST_CASE(freeze_preserves_timed_records_and_category_clear_is_independent) {
+    nowUs=100;PhysicsDebugDraw d(clockUs);auto o=options(DebugDrawLifetime::Timed);o.duration=ayt::time::Duration::fromUs(100);d.configure(o);
+    d.record(rayQuery(),PhysResult::Ok,false);d.setFrozen(true);nowUs=1000;
+    CHECK(d.consumeRecords().size()==1);CHECK(d.record(rayQuery(),PhysResult::Ok,true)==PhysResult::Ok);CHECK(d.recordCount()==1);
+    d.setFrozen(false);nowUs=1099;CHECK(d.consumeRecords().size()==1);nowUs=1100;CHECK(d.consumeRecords().empty());
+    d.configure(options(DebugDrawLifetime::Persistent));PhysicsDebugRecord ability;ability.category=PhysicsDebugCategory::Ability;ability.lines={{{},{1,0,0},0xffffffff}};
+    d.recordGeometry(ability);d.record(rayQuery(),PhysResult::Ok,false);d.clearCategory(PhysicsDebugCategory::Query);
+    CHECK(d.consumeRecords().size()==1);CHECK(d.consumeRecords()[0].category==PhysicsDebugCategory::Ability);
+}
+TEST_CASE(async_dimensions_do_not_alias_and_expiry_starts_at_completion) {
+    nowUs=1000;PhysicsDebugDraw d(clockUs);auto o=options(DebugDrawLifetime::Timed);o.duration=ayt::time::Duration::fromUs(100);d.configure(o);
+    auto q=rayQuery();q.queryId=7;q.dimension=PhysicsDimension::TwoD;d.track(q);q.dimension=PhysicsDimension::ThreeD;d.track(q);
+    QueryResult result;result.queryId=7;result.dimension=PhysicsDimension::TwoD;result.completedAtUs=1000;result.status=PhysResult::BackendError;
+    d.complete(result);result.dimension=PhysicsDimension::ThreeD;result.status=PhysResult::Ok;result.hitCount=1;d.complete(result);
+    const auto records=d.consumeRecords();CHECK(records.size()==2);CHECK(records[0].lines[0].color==o.errorColor);CHECK(records[1].hit);
+    nowUs=1100;CHECK(d.consumeRecords().empty());d.complete(result);CHECK(d.consumeRecords().empty());
+}
 TEST_SUITE_END

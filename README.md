@@ -148,25 +148,40 @@ Current public layout: `interface/AYPhysics/`, `include/AYPhysics/`, `backend/{N
 | 2026-07-09 | Original dual-path summary (now design.md §10) |
 | Earlier | Initial rigidbody / cloth / fluid / particle sketch |
 
-## Query debug drawing (2026-10-14)
+## Debug visualization (2026-10-15)
 
-Configure the manager-owned `PhysicsDebugDraw` on the game thread to opt in.
-Existing synchronous 2D/3D ray/sphere queries and 2D box queries then record their
-actual results: green miss, red hit (point and normal markers), yellow failure.
-Frame entries are consumed once; Timed uses monotonic real time; Persistent
-retains previous drawings until clear/disable/shutdown. Colors and duration are
-configurable. 1024 records / 16384 segments reject new records without evicting
-old history. Drawing/allocation failures never change physics results.
+Configure the manager-owned PhysicsDebugDraw on the game thread. Synchronous
+and asynchronous 2D/3D queries retain their real result, dimension, request ID,
+mask, hit bodies, point, normal and distance. Green is miss, red hit, yellow
+failure. Async completions are consumed by fetchResults or fetchDebugSnapshot;
+use one game-thread owner. Timed lifetime starts at backend completion.
 
-The built-in editor owns consumption and viewport controls. A custom host
-consumes owned lines and passes them to Renderer::setEditorDebugLines with an
-editor pipeline. Physics has no Renderer dependency. Async capture is explicit
-through record; no automatic async/result or deterministic-query instrumentation.
-Tests: PhysicsDebugDrawTests and real JoltColliderHitTests. See
+Frame, Timed and Persistent history share a 1024-record / 16384-line budget;
+new records are rejected instead of evicting retained history. Freeze suspends
+capture and expiry; unfreeze shifts timed deadlines. consumeRecords and
+consumeLines are alternative single-consumer APIs. recordGeometry accepts
+explicit adapter observations; diagnostic failure never changes simulation.
+
+setDebugSnapshotEnabled opts into physics-thread native inspection, with a
+category mask. fetchDebugSnapshot returns an owned, mutex-protected copy;
+ordinary sparse simulation snapshots keep their existing cadence. Native Jolt
+shape triangles include convex hulls, meshes, heightfields, offsets, sleeping
+and static non-ECS bodies. Box2D uses its native circle/capsule/polygon/segment
+shapes. Unsupported or over-budget geometry is counted rather than replaced
+with an AABB. Character capsules, ground state/normal, snap/step ranges,
+requested/actual velocity, joint anchors/axes and available limits are included.
+Contacts retain enter/stay/exit markers; Box2D exposes solved normal impulse.
+Jolt solved contact impulse is unavailable through the current integration and
+is explicitly flagged unavailable. No fabricated force value is displayed.
+
+3D oriented box async queries now transfer a full request through the existing
+out-of-band pool (command remains <=64 bytes). Jolt sphere/box and Box2D
+circle/box overlap use narrowphase geometry and the requested layer mask.
+Deterministic physics instrumentation remains outside this native diagnostic path.
+See PhysicsDebugDrawTests, PhysicsDebugSnapshotTests, JoltColliderHitTests and
 [SDK contract](../../AYDocs/sdk/contracts/common.md#commonphysicsdebug-draw).
 
-Final local verification: full inventory 139/139 passed (0 skipped/problems/
-unreported), including extreme finite direction normalization and 2D XY projection.
-Report: `out/physics-debug-20261014/physics-boundary-final/9d70c1701f8e4af69f3af0737ab678f2/cases.json`.
-The earlier 138-case full report remains historical; the initial sandbox PDB
-compile failure and intermediate inventory/build diagnostics are not passing gates.
+Verification: full audited inventory 146/146 passed, including real Jolt shape/
+controller/joint snapshots, oriented async boxes, narrowphase filtering and
+Box2D solved impulses. Final report:
+`out/debug-visualization-20261015/physics-final/a6118164d5314dbb8d3190c1a1137268/cases.json`.

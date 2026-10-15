@@ -43,6 +43,7 @@
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/CollisionCollector.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
@@ -62,6 +63,8 @@
 #include <atomic>
 #include <algorithm>
 #include <mutex>
+#include <map>
+#include <array>
 #include <thread>
 #include <vector>
 #include <unordered_map>
@@ -150,9 +153,10 @@ public:
                         JPH::ContactSettings& /*ioSettings*/) override {
         CollisionEvent ev{};
         ev.kind = 0;  // enter
+        ev.layerA=static_cast<PhysLayer>(inBody1.GetObjectLayer());
         ev.bodyA = _owner->handleFromBodyId(inBody1.GetID());
         ev.bodyB = _owner->handleFromBodyId(inBody2.GetID());
-        const JPH::Vec3 wp = inManifold.mBaseOffset;
+        const auto wp = inManifold.mRelativeContactPointsOn1.empty()?inManifold.mBaseOffset:inManifold.GetWorldSpaceContactPointOn1(0);
         ev.pointA = ayt::math::FVector3(static_cast<float>(wp.GetX()),
                                         static_cast<float>(wp.GetY()),
                                         static_cast<float>(wp.GetZ()));
@@ -162,6 +166,10 @@ public:
                                         static_cast<float>(n.GetY()),
                                         static_cast<float>(n.GetZ()));
         ev.impulse = 0.0f;
+        {std::lock_guard<std::mutex> lock(_cacheMutex);
+            const std::array<uint32_t,4> key{inBody1.GetID().GetIndexAndSequenceNumber(),inBody2.GetID().GetIndexAndSequenceNumber(),inManifold.mSubShapeID1.GetValue(),inManifold.mSubShapeID2.GetValue()};
+            if(_cache.size()<4096 || _cache.contains(key)) _cache[key]=ev;
+        }
         _owner->pushCollisionEvent(ev);
     }
 
@@ -170,9 +178,10 @@ public:
                             JPH::ContactSettings& /*ioSettings*/) override {
         CollisionEvent ev{};
         ev.kind = 1;  // stay
+        ev.layerA=static_cast<PhysLayer>(inBody1.GetObjectLayer());
         ev.bodyA = _owner->handleFromBodyId(inBody1.GetID());
         ev.bodyB = _owner->handleFromBodyId(inBody2.GetID());
-        const JPH::Vec3 wp = inManifold.mBaseOffset;
+        const auto wp = inManifold.mRelativeContactPointsOn1.empty()?inManifold.mBaseOffset:inManifold.GetWorldSpaceContactPointOn1(0);
         ev.pointA = ayt::math::FVector3(static_cast<float>(wp.GetX()),
                                         static_cast<float>(wp.GetY()),
                                         static_cast<float>(wp.GetZ()));
@@ -182,11 +191,19 @@ public:
                                         static_cast<float>(n.GetY()),
                                         static_cast<float>(n.GetZ()));
         ev.impulse = 0.0f;
+        {std::lock_guard<std::mutex> lock(_cacheMutex);
+            const std::array<uint32_t,4> key{inBody1.GetID().GetIndexAndSequenceNumber(),inBody2.GetID().GetIndexAndSequenceNumber(),inManifold.mSubShapeID1.GetValue(),inManifold.mSubShapeID2.GetValue()};
+            if(_cache.size()<4096 || _cache.contains(key)) _cache[key]=ev;
+        }
         _owner->pushCollisionEvent(ev);
     }
 
     void OnContactRemoved(const JPH::SubShapeIDPair& inSubShapePair) override {
         CollisionEvent ev{};
+        {std::lock_guard<std::mutex> lock(_cacheMutex);
+            const std::array<uint32_t,4> key{inSubShapePair.GetBody1ID().GetIndexAndSequenceNumber(),inSubShapePair.GetBody2ID().GetIndexAndSequenceNumber(),inSubShapePair.GetSubShapeID1().GetValue(),inSubShapePair.GetSubShapeID2().GetValue()};
+            const auto found=_cache.find(key);if(found!=_cache.end()) {ev=found->second;_cache.erase(found);}
+        }
         ev.kind = 2;  // exit
         ev.bodyA = _owner->handleFromBodyId(inSubShapePair.GetBody1ID());
         ev.bodyB = _owner->handleFromBodyId(inSubShapePair.GetBody2ID());
@@ -195,6 +212,8 @@ public:
     }
 
 private:
+    std::mutex _cacheMutex;
+    std::map<std::array<uint32_t,4>,CollisionEvent> _cache;
     JoltBackend3D* _owner = nullptr;
 };
 
@@ -425,6 +444,7 @@ struct JoltBackend3D::Impl {
     // Handle tables (sized at init3D; never resized).
     std::vector<JPH::BodyID>      bodyIdByIndex;
     std::vector<uint16_t>         bodyGeneration;
+    std::vector<ayt::math::FVector3> desiredVelocity;
     std::vector<PhysLayer>        bodyLayer;        // R9: category for GroupID
     std::vector<PhysLayerMask>    bodyCollideMask;  // R9: mask for SubGroupID
     std::vector<uint16_t>         colliderGeneration;
@@ -684,6 +704,7 @@ bool JoltBackend3D::init3D(const PhysicsBackendDescriptor& desc) {
     _impl->bodyIdByIndex.assign(maxBodies, JPH::BodyID());
     _impl->bodyGeneration.assign(maxBodies, 0u);
     _impl->bodyLayer.assign(maxBodies, 0u);
+    _impl->desiredVelocity.assign(maxBodies, {});
     _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
     _impl->colliderGeneration.assign(maxBodies, 0u);
     _impl->colliderBodyByIndex.assign(maxBodies, 0u);
@@ -875,6 +896,90 @@ void JoltBackend3D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
 // =============================================================================
 // execute — dispatch a PhysicsCommand (physics thread only)
 // =============================================================================
+void JoltBackend3D::appendDebugSnapshot(PhysicsDebugSnapshot& out) {
+    if(!_impl || !_impl->physicsSystem) return;
+    using V=ayt::math::FVector3;
+    auto cv=[](auto v)->V{return {float(v.GetX()),float(v.GetY()),float(v.GetZ())};};
+    const auto& locks=_impl->physicsSystem->GetBodyLockInterface();
+    for(uint32_t i=1;i<_impl->maxBodies;++i) {
+        if(!_impl->bodyGeneration[i]) continue;
+        JPH::BodyLockRead lock(locks,_impl->bodyIdByIndex[i]); if(!lock.Succeeded()) continue;
+        const auto& body=lock.GetBody();
+        PhysicsDebugRecord motion; motion.category=PhysicsDebugCategory::Motion;
+        motion.body=makeHandle(i,_impl->bodyGeneration[i]); motion.layer=_impl->bodyLayer[i];
+        motion.anchor=cv(body.GetPosition()); motion.velocity=cv(body.GetLinearVelocity());motion.desiredVelocity=_impl->desiredVelocity[i];
+        motion.label=body.IsActive()?"Velocity (awake)":"Velocity (sleeping/static)";
+        motion.lines.push_back({motion.anchor,motion.anchor+motion.velocity*.25f,0xff00ff00}); out.append(motion);
+        if(out.categories&1u) for(auto c:_impl->bodyColliders[i]) {
+            PhysicsDebugRecord r=motion; r.lines.clear(); r.category=PhysicsDebugCategory::Collider;
+            r.collider=makeHandle(c,_impl->colliderGeneration[c]); r.label=body.IsSensor()?"Native sensor":"Native collider";
+            auto* shape=_impl->colliderShapes[c].GetPtr(); if(!shape) continue;
+            const auto com=body.GetPosition()+body.GetRotation()*shape->GetCenterOfMass();
+            JPH::Shape::GetTrianglesContext context;
+            shape->GetTrianglesStart(context,JPH::AABox::sBiggest(),JPH::Vec3(com),body.GetRotation(),JPH::Vec3::sReplicate(1));
+            JPH::Float3 vertices[96];
+            for(;;) {
+                const int count=shape->GetTrianglesNext(context,32,vertices); if(!count) break;
+                if(r.lines.size()+size_t(count)*3>PhysicsDebugDraw::kMaxLines-out.lineCount) {++out.droppedRecords; r.lines.clear(); r.label+=" (geometry budget exceeded)"; break;}
+                for(int t=0;t<count*3;t+=3) for(int e=0;e<3;++e) {
+                    const auto& a=vertices[t+e]; const auto& b=vertices[t+(e+1)%3];
+                    r.lines.push_back({{a.x,a.y,a.z},{b.x,b.y,b.z},body.IsSensor()?0xffffff00u:0xff00c8ffu});
+                }
+            }
+            out.append(std::move(r));
+        }
+    }
+    if(out.categories&(1u<<3)) for(const auto& record:_impl->characters) if(record) {
+        const auto& c=*record->controller;
+        PhysicsDebugRecord r; r.category=PhysicsDebugCategory::Character; r.queryId=record->handle;
+        r.layer=record->desc.layer; r.anchor=cv(c.GetPosition()); r.velocity=cv(c.GetLinearVelocity());
+        r.desiredVelocity=record->input.horizontalVelocity;
+        const auto state=c.GetGroundState();
+        r.label=state==JPH::CharacterBase::EGroundState::OnGround?"Character: walkable":state==JPH::CharacterBase::EGroundState::OnSteepGround?"Character: steep":state==JPH::CharacterBase::EGroundState::InAir?"Character: air":"Character: unsupported";
+        ColliderDesc shape; shape.shape=ColliderShape::Capsule; shape.radius=record->desc.radius; shape.height=record->desc.height;
+        shape.offset={0,shape.height*.5f,0};
+        r.lines=PhysicsDebugDraw::colliderLines(shape,r.anchor,ayt::math::FQuaternion::identity(),PhysicsDimension::ThreeD,
+            state==JPH::CharacterBase::EGroundState::OnGround?0xff00ff00:0xff0000ff);
+        r.lines.push_back({r.anchor,r.anchor+cv(c.GetGroundNormal()),0xffffff00});
+        r.lines.push_back({r.anchor,r.anchor+r.desiredVelocity*.25f,0xffff0000});
+        r.lines.push_back({r.anchor,r.anchor+r.velocity*.25f,0xff00ff00});
+        r.lines.push_back({r.anchor,r.anchor+V{0,record->desc.maxStepHeight,0},0xffff00ff});
+        r.lines.push_back({r.anchor,r.anchor-V{0,record->desc.groundSnapDistance,0},0xff00ffff});
+        out.append(std::move(r));
+    }
+    if(out.categories&(1u<<5)) for(uint32_t i=1;i<_impl->maxBodies;++i) if(_impl->jointGeneration[i] && _impl->jointConstraintByIndex[i]) {
+        auto* c=static_cast<JPH::TwoBodyConstraint*>(_impl->jointConstraintByIndex[i]);
+        const auto a=c->GetBody1()->GetCenterOfMassTransform()*c->GetConstraintToBody1Matrix();
+        const auto b=c->GetBody2()->GetCenterOfMassTransform()*c->GetConstraintToBody2Matrix();
+        PhysicsDebugRecord r; r.category=PhysicsDebugCategory::Joint; r.queryId=makeHandle(i,_impl->jointGeneration[i]);
+        r.body=handleFromBodyId(c->GetBody1()->GetID()); r.layer=_impl->bodyLayer[handleIndex(r.body)];r.otherBody=handleFromBodyId(c->GetBody2()->GetID());
+        r.anchor=cv(a.GetTranslation()); const auto end=cv(b.GetTranslation()); r.label="Native joint anchors/axes";
+        r.lines.push_back({r.anchor,end,0xffffff00});
+        for(const auto& m:{a,b}) {
+            const auto p=cv(m.GetTranslation());
+            r.lines.push_back({p,p+cv(m.GetAxisX())*.5f,0xff0000ff});
+            r.lines.push_back({p,p+cv(m.GetAxisY())*.5f,0xff00ff00});
+            r.lines.push_back({p,p+cv(m.GetAxisZ())*.5f,0xffff0000});
+        }
+        if(c->GetSubType()==JPH::EConstraintSubType::Distance) {
+            auto* d=static_cast<JPH::DistanceConstraint*>(c); const auto delta=end-r.anchor;
+            const auto axis=delta.lengthSq()>1e-10f?delta.normalize():V{1,0,0};
+            r.label+=" limits=["+std::to_string(d->GetMinDistance())+","+std::to_string(d->GetMaxDistance())+"]";
+            r.lines.push_back({r.anchor+axis*d->GetMinDistance(),r.anchor+axis*d->GetMaxDistance(),0xffff00ff});
+        }
+        if(c->GetSubType()==JPH::EConstraintSubType::Hinge) {
+            auto* h=static_cast<JPH::HingeConstraint*>(c); const float low=h->GetLimitsMin(),high=h->GetLimitsMax();
+            r.label+=" angle="+std::to_string(h->GetCurrentAngle());
+            const auto u=cv(a.GetAxisY()),v=cv(a.GetAxisZ());
+            for(int n=0;n<32;++n) {
+                const float x=low+(high-low)*n/32.f,y=low+(high-low)*(n+1)/32.f;
+                r.lines.push_back({r.anchor+(u*std::cos(x)+v*std::sin(x))*.4f,r.anchor+(u*std::cos(y)+v*std::sin(y))*.4f,0xffff00ff});
+            }
+        }
+        out.append(std::move(r));
+    }
+}
+
 void JoltBackend3D::execute(const PhysicsCommand& cmd,
                             const PhysicsCreatePayload* createPayload) {
     ++_commandCount;
@@ -1002,6 +1107,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         _impl->bodyIdByIndex[idx] = id;
         _impl->bodyGeneration[idx] = static_cast<uint16_t>(handleGeneration(cmd.body));
         _impl->bodyLayer[idx]       = d.layer;
+        _impl->desiredVelocity[idx]=d.linearVelocity;
         _impl->bodyCollideMask[idx] = d.collideMask;
         if (d.alwaysSync) _impl->alwaysSyncSet.push_back(idx);
         return;
@@ -1225,43 +1331,21 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         return;
     }
 
-    case CT::RaycastAsync: {
-        ayt::math::Ray ray{};
-        ray.origin = {cmd.u.ray.ox, cmd.u.ray.oy, cmd.u.ray.oz};
-        ray.dir = {cmd.u.ray.dx, cmd.u.ray.dy, cmd.u.ray.dz};
-        QueryResult result{};
-        result.queryId = cmd.queryId;
-        const auto hit = castRay(ray, cmd.layerMask);
-        if (hit.hit) { result.hitCount = 1; result.hits.push_back(hit); }
-        std::lock_guard<std::mutex> lock(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(result));
-        return;
-    }
-
-    case CT::OverlapSphereAsync: {
-        struct CollectorCB : public JPH::CollideShapeBodyCollector {
-            uint32_t hitCount = 0;
-            void AddHit(const JPH::BodyID& /*inID*/) override { ++hitCount; }
-        } cb;
-        _impl->physicsSystem->GetBroadPhaseQuery().CollideSphere(
-            JPH::Vec3(cmd.u.sphere.cx, cmd.u.sphere.cy, cmd.u.sphere.cz),
-            cmd.u.sphere.radius, cb);
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        qr.hitCount = cb.hitCount;
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(qr));
-        return;
-    }
-
+    case CT::RaycastAsync:
+    case CT::OverlapSphereAsync:
     case CT::OverlapBoxAsync: {
-        // R1.5b: command packs only center (R1 limit); emit empty result.
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        qr.hitCount = 0;
-        _impl->asyncQueryQueue.push_back(std::move(qr));
-        return;
+        SyncQueryRequest req; req.requestId=cmd.queryId; req.layerMask=cmd.layerMask;
+        if(cmd.type==CT::RaycastAsync) { req.type=SyncQueryType::Raycast;
+            req.ray.origin={cmd.u.ray.ox,cmd.u.ray.oy,cmd.u.ray.oz}; req.ray.dir={cmd.u.ray.dx,cmd.u.ray.dy,cmd.u.ray.dz};
+        } else if(cmd.type==CT::OverlapSphereAsync) {req.type=SyncQueryType::OverlapSphere; req.sphereCenter={cmd.u.sphere.cx,cmd.u.sphere.cy,cmd.u.sphere.cz};req.sphereRadius=cmd.u.sphere.radius;
+        } else { if(!createPayload) return; req=createPayload->queryDesc; }
+        SyncQueryResponse response; executeSync(req,response);
+        QueryResult result; result.queryId=cmd.queryId; result.status=response.status;
+        result.dimension=PhysicsDimension::ThreeD;
+        if(response.firstHit.hit) result.hits.push_back(response.firstHit);
+        for(auto body:response.overlaps) {RaycastHit hit; hit.hit=true;hit.body=body;result.hits.push_back(hit);}
+        result.hitCount=static_cast<uint32_t>(result.hits.size());result.completedAtUs=ayt::time::Clock::performanceNowUs();
+        std::lock_guard<std::mutex> lock(_impl->asyncQueryMu); _impl->asyncQueryQueue.push_back(std::move(result)); return;
     }
 
     case CT::WakeAll: {
@@ -1314,6 +1398,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         }
         const JPH::BodyID id = _impl->bodyIdByIndex[idx];
         if (id.IsInvalid()) { ++_notFoundCount; return; }
+        _impl->desiredVelocity[idx]={cmd.u.vec4.x,cmd.u.vec4.y,cmd.u.vec4.z};
         bi.SetLinearVelocity(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z));
         bi.ActivateBody(id);
         return;
@@ -1462,25 +1547,24 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
         outResponse.firstHit = castRay(ray, request.layerMask);
         return;
     }
-    case SyncQueryType::OverlapSphere: {
-        struct SphereCollector : public JPH::CollideShapeBodyCollector {
-            std::vector<BodyHandle> outHandles;
-            void AddHit(const JPH::BodyID& inID) override {
-                BodyHandle h = owner->handleFromBodyId(inID);
-                if (h != InvalidBodyHandle) outHandles.push_back(h);
-            }
-            JoltBackend3D* owner = nullptr;
-        } cb;
-        cb.owner = this;
-        _impl->physicsSystem->GetBroadPhaseQuery().CollideSphere(
-            JPH::Vec3(request.sphereCenter.x, request.sphereCenter.y, request.sphereCenter.z),
-            request.sphereRadius, cb);
-        outResponse.overlaps = std::move(cb.outHandles);
-        return;
-    }
+    case SyncQueryType::OverlapSphere:
     case SyncQueryType::OverlapBox: {
-        // R1.5b: command packed only center; clear overlaps (R2 widens).
-        outResponse.overlaps.clear();
+        ColliderDesc desc; const bool sphere=request.type==SyncQueryType::OverlapSphere;
+        desc.shape=sphere?ColliderShape::Sphere:ColliderShape::Box; desc.radius=request.sphereRadius; desc.halfExtents=request.boxHalfExtents;
+        const auto center=sphere?request.sphereCenter:request.boxCenter;
+        auto rotation=sphere?ayt::math::FQuaternion::identity():request.boxRotation;
+        if(!detail::finiteVector(center) || (sphere?(!std::isfinite(desc.radius)||desc.radius<=0):(!detail::finiteVector(desc.halfExtents)||desc.halfExtents.x<=0||desc.halfExtents.y<=0||desc.halfExtents.z<=0)) || !std::isfinite(rotation.dot(rotation)) || rotation.dot(rotation)<1e-12f) {
+            outResponse.status=PhysResult::InvalidParam; return;
+        }
+        rotation=rotation.normalize(); const auto shape=makeShape(desc); if(!shape) {outResponse.status=PhysResult::InvalidParam;return;}
+        struct Collector:public JPH::CollideShapeCollector {
+            JoltBackend3D* owner=nullptr; std::vector<BodyHandle>* output=nullptr;
+            void AddHit(const JPH::CollideShapeResult& hit) override {const auto body=owner->handleFromBodyId(hit.mBodyID2);if(body && std::find(output->begin(),output->end(),body)==output->end()) output->push_back(body);}
+        } collector; collector.owner=this;collector.output=&outResponse.overlaps;
+        QueryLayerFilter filter(request.layerMask);
+        _impl->physicsSystem->GetNarrowPhaseQuery().CollideShape(shape,JPH::Vec3::sReplicate(1),
+            JPH::RMat44::sRotationTranslation(JPH::Quat(rotation.x,rotation.y,rotation.z,rotation.w),JPH::RVec3(center.x,center.y,center.z)),
+            JPH::CollideShapeSettings{},JPH::RVec3::sZero(),collector,{},filter);
         return;
     }
     }

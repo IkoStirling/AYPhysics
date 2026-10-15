@@ -195,12 +195,18 @@ struct CollisionEvent {
     ayt::math::FVector3 normal{};
     float      impulse = 0.0f;
     uint8_t    kind    = 0;  // 0=enter, 1=stay, 2=exit
+    PhysicsDimension dimension = PhysicsDimension::ThreeD;
+    bool impulseAvailable = false;
+    PhysLayer layerA = 0;
 };
 
 struct QueryResult {
     uint32_t   queryId = 0;
     uint32_t   hitCount = 0;
     std::vector<RaycastHit> hits;          // raycast: first hit; overlap: many
+    PhysicsDimension dimension = PhysicsDimension::ThreeD;
+    PhysResult status = PhysResult::Ok;
+    uint64_t completedAtUs = 0;
 };
 
 struct PhysFrameSnapshot {

@@ -16,6 +16,7 @@
 #include <atomic>
 #include <memory>
 #include <thread>
+#include <mutex>
 
 namespace ayt::physics {
 
@@ -65,6 +66,10 @@ public:
     /// consume in the editor after query completion. No renderer dependency.
     PhysicsDebugDraw& debugDraw() noexcept { return _debugDraw; }
 
+    /// Opt-in diagnostic collection on the physics owner thread. No native pointers escape.
+    PhysResult setDebugSnapshotEnabled(bool enabled, uint32_t categories = 0x3f) noexcept;
+    /// Owned copy; drains asynchronous diagnostic completions exactly once.
+    PhysicsDebugSnapshot fetchDebugSnapshot();
     void shutdown();
 
     // True while the physics thread is alive. F-P2: lets callers distinguish
@@ -92,7 +97,12 @@ private:
     void _physicsThreadMain();
 
     PhysicsBackendDescriptor _descriptor{};
+    uint64_t _lastDebugQueryFrame = 0;
     PhysicsDebugDraw _debugDraw;
+    std::atomic<bool> _debugSnapshotEnabled{false};
+    std::atomic<uint32_t> _debugSnapshotCategories{0x3f};
+    std::mutex _debugSnapshotMutex;
+    PhysicsDebugSnapshot _debugSnapshot;
     std::unique_ptr<PhysicsWorld3D> _world3D;
     std::unique_ptr<PhysicsWorld2D> _world2D;
     std::unique_ptr<IPhysicsBackend3D> _backend3D;

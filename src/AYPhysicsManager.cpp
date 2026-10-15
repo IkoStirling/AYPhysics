@@ -22,6 +22,7 @@
 #include "AYPlatform/Thread.h"
 
 #include <mutex>
+#include <algorithm>
 
 namespace ayt::physics {
 
@@ -211,7 +212,9 @@ PhysResult PhysicsManager::stepAndWait(float deltaTime,
 
 const PhysFrameSnapshot& PhysicsManager::fetchResults() {
     const uint32_t idx = _frontIndex.load(std::memory_order_acquire);
-    return _snapshots[idx];
+    const auto& snapshot=_snapshots[idx];
+    if(snapshot.frameIndex!=_lastDebugQueryFrame) {for(const auto& result:snapshot.queryResults) _debugDraw.complete(result);_lastDebugQueryFrame=snapshot.frameIndex;}
+    return snapshot;
 }
 
 void PhysicsManager::publishSnapshot() {
@@ -229,6 +232,20 @@ void PhysicsManager::publishSnapshot() {
     _snapshots[oldFront].characters.clear();
 }
 
+PhysResult PhysicsManager::setDebugSnapshotEnabled(bool enabled, uint32_t categories) noexcept {
+    _debugSnapshotCategories.store(categories,std::memory_order_release);
+    _debugSnapshotEnabled.store(enabled,std::memory_order_release);
+    if(!enabled) { std::lock_guard<std::mutex> lock(_debugSnapshotMutex); _debugSnapshot={}; }
+    return PhysResult::Ok;
+}
+PhysicsDebugSnapshot PhysicsManager::fetchDebugSnapshot() {
+    PhysicsDebugSnapshot result;
+    { std::lock_guard<std::mutex> lock(_debugSnapshotMutex); result=_debugSnapshot; _debugSnapshot.queryResults.clear();
+        std::erase_if(_debugSnapshot.records,[](const auto& r){return r.category==PhysicsDebugCategory::Contact;});
+        _debugSnapshot.lineCount=0;for(const auto& r:_debugSnapshot.records)_debugSnapshot.lineCount+=r.lines.size(); }
+    for(const auto& query:result.queryResults) _debugDraw.complete(query);
+    return result;
+}
 void PhysicsManager::shutdown() {
     if (!_running.exchange(false, std::memory_order_acq_rel)) return;
     _debugDraw.clear();
@@ -270,7 +287,8 @@ void PhysicsManager::_physicsThreadMain() {
             if (cmd.type == PhysicsCommandType::CreateRigidbody ||
                 cmd.type == PhysicsCommandType::CreateCollider ||
                 cmd.type == PhysicsCommandType::CreateJoint ||
-                cmd.type == PhysicsCommandType::CreateCharacter) {
+                cmd.type == PhysicsCommandType::CreateCharacter ||
+                cmd.type == PhysicsCommandType::OverlapBoxAsync) {
                 if (cmd.createSlot != InvalidCreateSlotId &&
                     _createPool->take(cmd.createSlot, payload)) {
                     pPayload = &payload;
@@ -310,7 +328,31 @@ void PhysicsManager::_physicsThreadMain() {
             PhysFrameSnapshot& back = _snapshots[_backIndex.load(std::memory_order_relaxed)];
             back.stepSeconds = lastDt;
             if (_backend3D) _backend3D->publishSnapshot(back);
+            const auto queryBase=back.queryResults.size(), contactBase=back.collisionEvents.size();
             if (_backend2D) _backend2D->publishSnapshot(back);
+            for(size_t i=queryBase;i<back.queryResults.size();++i) back.queryResults[i].dimension=PhysicsDimension::TwoD;
+            for(size_t i=contactBase;i<back.collisionEvents.size();++i) back.collisionEvents[i].dimension=PhysicsDimension::TwoD;
+            if(_debugSnapshotEnabled.load(std::memory_order_acquire)) try {
+                PhysicsDebugSnapshot debug; debug.categories=_debugSnapshotCategories.load(std::memory_order_acquire); debug.frameIndex=_frameIndex.load()+1; debug.stepSeconds=lastDt;
+                if(_backend3D) _backend3D->appendDebugSnapshot(debug);
+                if(_backend2D) _backend2D->appendDebugSnapshot(debug);
+                for(const auto& event:back.collisionEvents) {
+                    PhysicsDebugRecord r; r.category=PhysicsDebugCategory::Contact; r.dimension=event.dimension;
+                    r.layer=event.layerA;r.body=event.bodyA; r.otherBody=event.bodyB; r.anchor=event.pointA;r.hitPoint=event.pointA;r.normal=event.normal;
+                    r.impulse=event.impulse; r.impulseAvailable=event.impulseAvailable;
+                    r.label=event.kind==0?"Contact enter":event.kind==1?"Contact stay":event.kind==2?"Contact exit":event.kind==3?"Trigger enter":"Trigger exit";
+                    const uint32_t color=event.kind==0?0xff00ff00:event.kind==1?0xff00ffff:0xff0000ff;
+                    r.lines.push_back({event.pointA,event.pointA+event.normal*.5f,color});
+                    const auto p=event.pointA; r.lines.push_back({p-ayt::math::FVector3{.05f,0,0},p+ayt::math::FVector3{.05f,0,0},color});
+                    if(event.impulseAvailable) r.lines.push_back({p,p+event.normal*std::min(event.impulse,10.f),0xffff00ff});
+                    debug.append(std::move(r));
+                }
+                std::lock_guard<std::mutex> lock(_debugSnapshotMutex);
+                for(const auto& record:_debugSnapshot.records) if(record.category==PhysicsDebugCategory::Contact) debug.append(record);
+                debug.queryResults=std::move(_debugSnapshot.queryResults);
+                for(const auto& q:back.queryResults) if(debug.queryResults.size()<PhysicsDebugDraw::kMaxRecords) debug.queryResults.push_back(q); else ++debug.droppedRecords;
+                if(_debugSnapshotEnabled.load(std::memory_order_acquire)) _debugSnapshot=std::move(debug);
+            } catch(...) { /* Diagnostics must never stop the simulation worker. */ }
             publishSnapshot();
             if (completionSequence != 0) {
                 _completedStepSequence.store(completionSequence,

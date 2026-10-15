@@ -34,7 +34,7 @@ PhysResult PhysicsDebugDraw::configure(const PhysicsDebugDrawOptions& o) {
 void PhysicsDebugDraw::expire(uint64_t now) {
     for(auto i=_records.begin();i!=_records.end();) {
         if(i->lifetime==DebugDrawLifetime::Timed && now>=i->expires) {
-            _lineCount-=i->lines.size(); i=_records.erase(i);
+            _lineCount-=i->value.lines.size(); i=_records.erase(i);
         } else ++i;
     }
 }
@@ -91,8 +91,8 @@ std::vector<PhysicsDebugLine> PhysicsDebugDraw::colliderLines(const ColliderDesc
     if(std::any_of(out.begin(),out.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);})) out.clear();
     return out;
 }
-PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult result, bool hit, const RaycastHit* detail) noexcept try {
-    if(!_options.enabled) return PhysResult::Ok;
+PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult result, bool hit, const RaycastHit* detail, const std::vector<BodyHandle>* overlaps) noexcept try {
+    if(!_options.enabled || _frozen) return PhysResult::Ok;
     const uint64_t now=_clock(); expire(now);
     const uint32_t c=result!=PhysResult::Ok?_options.errorColor:(hit?_options.hitColor:_options.missColor);
     std::vector<PhysicsDebugLine> lines;
@@ -117,32 +117,84 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
         if(q.type==SyncQueryType::OverlapSphere) { s.shape=ColliderShape::Sphere; s.radius=q.radius; }
         else if(q.type==SyncQueryType::OverlapBox) { s.shape=ColliderShape::Box; s.halfExtents=q.halfExtents; }
         else return PhysResult::InvalidParam;
-        lines=colliderLines(s,q.center,ayt::math::FQuaternion::identity(),q.dimension,c);
+        lines=colliderLines(s,q.center,q.rotation,q.dimension,c);
         if(lines.empty()) return PhysResult::InvalidParam;
     }
     if(std::any_of(lines.begin(),lines.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);})) return PhysResult::InvalidParam;
-    if(_records.size()>=kMaxRecords||lines.size()>kMaxLines-_lineCount) { ++_dropped; return PhysResult::QueueFull; }
-    uint64_t expires=0;
-    if(_options.lifetime==DebugDrawLifetime::Timed) {
-        const uint64_t duration=static_cast<uint64_t>(_options.duration.toUs());
-        expires=duration>UINT64_MAX-now?UINT64_MAX:now+duration;
-    }
-    const size_t count=lines.size();
-    _records.push_back({std::move(lines),_options.lifetime,expires});
-    _lineCount+=count;
-    return PhysResult::Ok;
+    PhysicsDebugRecord value;
+    value.category=PhysicsDebugCategory::Query; value.dimension=q.dimension;
+    value.queryId=q.queryId; value.layerMask=q.layerMask; value.status=result; value.hit=hit;
+    value.anchor=q.type==SyncQueryType::Raycast?q.ray.origin:q.center;
+    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
+    if(detail) { value.body=detail->body; value.collider=detail->collider; value.distance=detail->distance;value.hitPoint=detail->point;value.normal=detail->normal; }
+    if(overlaps) {value.hitBodies=*overlaps;if(!value.body && !overlaps->empty())value.body=overlaps->front();}
+    else if(detail && detail->body) value.hitBodies.push_back(detail->body);
+    value.completedAtUs=q.completedAtUs;
+    value.lines=std::move(lines);
+    return recordGeometry(std::move(value));
 } catch (...) {
     ++_dropped;
     return PhysResult::NoMemory;
 }
 std::vector<PhysicsDebugLine> PhysicsDebugDraw::consumeLines() {
-    expire(_clock());
-    std::vector<PhysicsDebugLine> out; out.reserve(_lineCount);
+    std::vector<PhysicsDebugLine> out;
+    for(auto& value:consumeRecords()) out.insert(out.end(),value.lines.begin(),value.lines.end());
+    return out;
+}
+std::vector<PhysicsDebugRecord> PhysicsDebugDraw::consumeRecords() {
+    if(!_frozen) expire(_clock());
+    std::vector<PhysicsDebugRecord> out; out.reserve(_records.size());
     for(auto i=_records.begin();i!=_records.end();) {
-        out.insert(out.end(),i->lines.begin(),i->lines.end());
-        if(i->lifetime==DebugDrawLifetime::Frame) { _lineCount-=i->lines.size(); i=_records.erase(i); }
+        out.push_back(i->value);
+        if(!_frozen && i->lifetime==DebugDrawLifetime::Frame) { _lineCount-=i->value.lines.size(); i=_records.erase(i); }
         else ++i;
     }
     return out;
+}
+PhysResult PhysicsDebugDraw::recordGeometry(PhysicsDebugRecord value) noexcept try {
+    if(!_options.enabled || _frozen) return PhysResult::Ok;
+    const auto now=_clock();expire(now);
+    if(std::any_of(value.lines.begin(),value.lines.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);})) return PhysResult::InvalidParam;
+    if(_records.size()>=kMaxRecords || value.lines.size()>kMaxLines-_lineCount) {++_dropped;return PhysResult::QueueFull;}
+    const auto duration=static_cast<uint64_t>(std::max<int64_t>(0,_options.duration.toUs()));
+    const auto completed=value.completedAtUs?value.completedAtUs:now;
+    value.completedAtUs=completed;
+    const auto expires=duration>UINT64_MAX-completed?UINT64_MAX:completed+duration;
+    const auto count=value.lines.size();_records.push_back({std::move(value),_options.lifetime,expires});_lineCount+=count;
+    return PhysResult::Ok;
+} catch(...) {++_dropped;return PhysResult::NoMemory;}
+void PhysicsDebugDraw::setFrozen(bool frozen) noexcept {
+    if(frozen==_frozen) return;
+    const auto now=_clock();
+    if(frozen) _freezeTime=now;
+    else for(auto& r:_records) if(r.lifetime==DebugDrawLifetime::Timed) {
+        const auto delta=now-_freezeTime; r.expires=delta>UINT64_MAX-r.expires?UINT64_MAX:r.expires+delta;
+    }
+    _frozen=frozen;
+}
+void PhysicsDebugDraw::clearCategory(PhysicsDebugCategory category) noexcept {
+    for(auto i=_records.begin();i!=_records.end();) if(i->value.category==category) {
+        _lineCount-=i->value.lines.size(); i=_records.erase(i);
+    } else ++i;
+    if(category==PhysicsDebugCategory::Query) _pending.clear();
+}
+PhysResult PhysicsDebugDraw::track(const PhysicsDebugQuery& q) noexcept try {
+    if(!_options.enabled || _frozen) return PhysResult::Ok;
+    if(_pending.size()>=kMaxRecords) {++_dropped; return PhysResult::QueueFull;}
+    _pending[(uint64_t(q.dimension)<<32)|q.queryId]=q; return PhysResult::Ok;
+} catch(...) {++_dropped; return PhysResult::NoMemory;}
+void PhysicsDebugDraw::complete(const QueryResult& result) {
+    const auto key=(uint64_t(result.dimension)<<32)|result.queryId;
+    const auto found=_pending.find(key); if(found==_pending.end()) return;
+    auto query=found->second; _pending.erase(found);query.completedAtUs=result.completedAtUs;
+    std::vector<BodyHandle> bodies;for(const auto& hit:result.hits) if(hit.body) bodies.push_back(hit.body);
+    (void)record(query,result.status,result.hitCount!=0,result.hits.empty()?nullptr:&result.hits.front(),&bodies);
+}
+bool PhysicsDebugSnapshot::append(PhysicsDebugRecord record) {
+    if(!(categories&(1u<<uint32_t(record.category)))) return true;
+    if(records.size()>=PhysicsDebugDraw::kMaxRecords || record.lines.size()>PhysicsDebugDraw::kMaxLines-lineCount) {
+        ++droppedRecords; return false;
+    }
+    lineCount+=record.lines.size(); records.push_back(std::move(record)); return true;
 }
 } // namespace ayt::physics

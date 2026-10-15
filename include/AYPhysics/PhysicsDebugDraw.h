@@ -2,6 +2,8 @@
 #include <AYPhysics/PhysicsTypes.h>
 #include <AYTime/Clock.h>
 #include <deque>
+#include <string>
+#include <map>
 
 namespace ayt::physics {
 enum class DebugDrawLifetime : uint8_t { Frame, Timed, Persistent };
@@ -17,12 +19,47 @@ struct PhysicsDebugLine {
     ayt::math::FVector3 from{}, to{};
     uint32_t color = 0xff00ff00u;
 };
+enum class PhysicsDebugCategory : uint8_t { Collider, Query, Contact, Character, Motion, Joint, Camera, Skeleton, Ability };
 struct PhysicsDebugQuery {
     SyncQueryType type = SyncQueryType::Raycast;
     PhysicsDimension dimension = PhysicsDimension::ThreeD;
     ayt::math::Ray ray{};
     ayt::math::FVector3 center{}, halfExtents{};
     float radius = 0;
+    ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
+    uint32_t queryId = 0;
+    PhysLayerMask layerMask = 0xffffffffu;
+    uint64_t completedAtUs = 0;
+};
+
+/// Owned diagnostic values; identities include the independent physics dimension.
+struct PhysicsDebugRecord {
+    PhysicsDebugCategory category = PhysicsDebugCategory::Query;
+    PhysicsDimension dimension = PhysicsDimension::ThreeD;
+    BodyHandle body = 0, otherBody = 0;
+    ColliderHandle collider = 0;
+    uint32_t queryId = 0, entityId = 0, otherEntityId = 0;
+    PhysLayer layer = 0;
+    PhysLayerMask layerMask = 0xffffffffu;
+    PhysResult status = PhysResult::Ok;
+    bool hit = false, impulseAvailable = false;
+    float distance = 0, impulse = 0;
+    uint64_t completedAtUs = 0;
+    std::vector<BodyHandle> hitBodies;
+    std::vector<uint32_t> relatedEntities;
+    ayt::math::FVector3 anchor{}, velocity{}, desiredVelocity{}, hitPoint{}, normal{};
+    std::string label;
+    std::vector<PhysicsDebugLine> lines;
+};
+struct PhysicsDebugSnapshot {
+    uint32_t categories = 0x1ff;
+    uint64_t frameIndex = 0;
+    float stepSeconds = 0;
+    size_t droppedRecords = 0, lineCount = 0;
+    std::vector<PhysicsDebugRecord> records;
+    std::vector<QueryResult> queryResults;
+    /// Reject whole records at the diagnostic budget; never changes simulation.
+    bool append(PhysicsDebugRecord record);
 };
 
 /// Game-thread diagnostic history, independent of simulation and Renderer.
@@ -41,9 +78,20 @@ public:
     /// Capture a completed real query; errors use a distinct color, never green.
     /// Returns QueueFull at the diagnostic budget; physics results are unaffected.
     PhysResult record(const PhysicsDebugQuery& query, PhysResult result,
-                      bool hit, const RaycastHit* detail = nullptr) noexcept;
+                      bool hit, const RaycastHit* detail = nullptr,
+                      const std::vector<BodyHandle>* overlaps = nullptr) noexcept;
     std::vector<PhysicsDebugLine> consumeLines();
-    void clear() noexcept { _records.clear(); _lineCount = 0; _dropped = 0; }
+    /// Same lifetime semantics as consumeLines; use exactly one consumer.
+    std::vector<PhysicsDebugRecord> consumeRecords();
+    /// Track accepted asynchronous work; capture only completed results.
+    PhysResult track(const PhysicsDebugQuery& query) noexcept;
+    void complete(const QueryResult& result);
+    /// Explicit owned diagnostics from gameplay adapters; respects the same lifetime/budget.
+    PhysResult recordGeometry(PhysicsDebugRecord record) noexcept;
+    void setFrozen(bool frozen) noexcept;
+    void clearCategory(PhysicsDebugCategory category) noexcept;
+    size_t recordCount() const noexcept { return _records.size(); }
+    void clear() noexcept { _records.clear(); _lineCount = 0; _dropped = 0; _pending.clear(); }
     size_t droppedRecords() const noexcept { return _dropped; }
     /// Wire geometry shared with editor authoring. Pose has no implicit scale;
     /// the Entity physics bridge likewise ignores Transform scale.
@@ -51,8 +99,11 @@ public:
         const ayt::math::FVector3& position, const ayt::math::FQuaternion& rotation,
         PhysicsDimension dimension, uint32_t color);
 private:
-    struct Record { std::vector<PhysicsDebugLine> lines; DebugDrawLifetime lifetime; uint64_t expires; };
+    struct Record { PhysicsDebugRecord value; DebugDrawLifetime lifetime; uint64_t expires; };
     void expire(uint64_t now);
+    bool _frozen = false;
+    uint64_t _freezeTime = 0;
+    std::map<uint64_t, PhysicsDebugQuery> _pending;
     TimeSource _clock;
     PhysicsDebugDrawOptions _options;
     std::deque<Record> _records;

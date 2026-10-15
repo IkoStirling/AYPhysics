@@ -344,6 +344,10 @@ uint32_t PhysicsWorld3D::raycastAsync(const ayt::math::Ray& ray, PhysLayerMask l
     cmd.u.ray.ox = ray.origin.x; cmd.u.ray.oy = ray.origin.y; cmd.u.ray.oz = ray.origin.z;
     cmd.u.ray.dx = ray.dir.x;    cmd.u.ray.dy = ray.dir.y;    cmd.u.ray.dz = ray.dir.z;
     if (!m->commandQueue()->tryPush(cmd)) return 0;
+    PhysicsDebugQuery debug; debug.type=SyncQueryType::Raycast; debug.dimension=PhysicsDimension::ThreeD;
+    debug.queryId=cmd.queryId; debug.layerMask=layerMask;
+    debug.ray=ray;
+    (void)m->debugDraw().track(debug);
     return cmd.queryId;
 }
 
@@ -358,6 +362,10 @@ uint32_t PhysicsWorld3D::overlapSphereAsync(const ayt::math::FVector3& center, f
     cmd.u.sphere.cx = center.x; cmd.u.sphere.cy = center.y; cmd.u.sphere.cz = center.z;
     cmd.u.sphere.radius = radius;
     if (!m->commandQueue()->tryPush(cmd)) return 0;
+    PhysicsDebugQuery debug; debug.type=SyncQueryType::OverlapSphere; debug.dimension=PhysicsDimension::ThreeD;
+    debug.queryId=cmd.queryId; debug.layerMask=layerMask;
+    debug.center=center; debug.radius=radius;
+    (void)m->debugDraw().track(debug);
     return cmd.queryId;
 }
 
@@ -370,13 +378,15 @@ uint32_t PhysicsWorld3D::overlapBoxAsync(const ayt::math::FVector3& center,
     cmd.type = PhysicsCommandType::OverlapBoxAsync;
     cmd.queryId = nextQueryId();
     cmd.layerMask = layerMask;
-    cmd.u.vec4.x = center.x; cmd.u.vec4.y = center.y; cmd.u.vec4.z = center.z; cmd.u.vec4.w = 0.0f;
-    // R1 packs only center+radius/halfExtents; rotation/halfExtents encoded
-    // separately once compact command grows. For now, store halfExtents in
-    // second slot would overflow 64 B; we pack center only and rely on Mock/Null
-    // for behaviour. R1.5 will widen.
-    (void)halfExtents; (void)rot;
-    if (!m->commandQueue()->tryPush(cmd)) return 0;
+    PhysicsCreatePayload payload; payload.queryDesc.type=SyncQueryType::OverlapBox;
+    payload.queryDesc.requestId=cmd.queryId; payload.queryDesc.layerMask=layerMask;
+    payload.queryDesc.boxCenter=center; payload.queryDesc.boxHalfExtents=halfExtents; payload.queryDesc.boxRotation=rot;
+    cmd.createSlot=m->createPool()->allocate(payload); if(!cmd.createSlot) return 0;
+    if(!m->commandQueue()->tryPush(cmd)) { (void)m->createPool()->take(cmd.createSlot,payload); return 0; }
+    PhysicsDebugQuery debug; debug.type=SyncQueryType::OverlapBox; debug.dimension=PhysicsDimension::ThreeD;
+    debug.queryId=cmd.queryId; debug.layerMask=layerMask;
+    debug.center=center; debug.halfExtents=halfExtents; debug.rotation=rot;
+    (void)m->debugDraw().track(debug);
     return cmd.queryId;
 }
 
@@ -393,6 +403,7 @@ PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     req.requestId = nextQueryId();
     req.layerMask = layerMask;
     req.ray = ray;
+    debug.queryId=req.requestId; debug.layerMask=layerMask;
     SyncQueryResponse resp{};
     if (!m->syncMailbox()->submitAndWait(req, resp, /*timeout*/ 1000 * 1000)) {
         (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
@@ -416,13 +427,14 @@ PhysResult PhysicsWorld3D::overlapSphereSync(const ayt::math::FVector3& center, 
     req.layerMask = layerMask;
     req.sphereCenter = center;
     req.sphereRadius = radius;
+    debug.queryId=req.requestId; debug.layerMask=layerMask;
     SyncQueryResponse resp{};
     if (!m->syncMailbox()->submitAndWait(req, resp, /*timeout*/ 1000 * 1000)) {
         (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
     out = resp.overlaps;
-    (void)m->debugDraw().record(debug, resp.status, !out.empty());
+    (void)m->debugDraw().record(debug, resp.status, !out.empty(),nullptr,&out);
     return resp.status;
 }
 

@@ -107,6 +107,7 @@ struct Box2DBackend2D::Impl {
     std::vector<b2JointId> jointIdByIndex;
 
     // Per-body collision filter (A5): layer + collideMask from RigidbodyDesc.
+    std::vector<ayt::math::FVector3> desiredVelocity;
     std::vector<PhysLayer>     bodyLayer;
     std::vector<PhysLayerMask> bodyCollideMask;
 
@@ -150,6 +151,7 @@ bool Box2DBackend2D::init2D(const PhysicsBackendDescriptor& desc) {
     _impl->jointGeneration.assign(maxBodies, 0u);
     _impl->jointIdByIndex.assign(maxBodies, B2_ZERO_INIT);
     _impl->bodyLayer.assign(maxBodies, 0u);
+    _impl->desiredVelocity.assign(maxBodies, {});
     _impl->bodyCollideMask.assign(maxBodies, 0xFFFFFFFFu);
     _impl->liveBodyIndices.clear();
     _impl->liveBodyIndices.reserve(std::min<uint32_t>(maxBodies, 1024u));
@@ -226,11 +228,13 @@ void Box2DBackend2D::step(float deltaTime) {
         for (int i = 0; i < ce.beginCount; ++i) {
             const b2ContactBeginTouchEvent& e = ce.beginEvents[i];
             CollisionEvent ev{};
+            if(e.manifold.pointCount) {const auto p=e.manifold.points[0].point;ev.pointA={p.x,p.y,0};ev.pointB=ev.pointA;}
             ev.kind  = 0;  // enter
             ev.bodyA  = bodyOf(e.shapeIdA);
             ev.bodyB  = bodyOf(e.shapeIdB);
             ev.normal = ayt::math::FVector3(
                 e.manifold.normal.x, e.manifold.normal.y, 0.0f);
+            if(ev.bodyA) ev.layerA=_impl->bodyLayer[handleIndex(ev.bodyA)];
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -240,6 +244,7 @@ void Box2DBackend2D::step(float deltaTime) {
             ev.kind  = 2;  // exit
             ev.bodyA  = bodyOf(e.shapeIdA);
             ev.bodyB  = bodyOf(e.shapeIdB);
+            if(ev.bodyA) ev.layerA=_impl->bodyLayer[handleIndex(ev.bodyA)];
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -253,6 +258,7 @@ void Box2DBackend2D::step(float deltaTime) {
             ev.kind  = 3;  // sensor enter
             ev.bodyA  = bodyOf(e.sensorShapeId);
             ev.bodyB  = bodyOf(e.visitorShapeId);
+            if(ev.bodyA) ev.layerA=_impl->bodyLayer[handleIndex(ev.bodyA)];
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -262,6 +268,7 @@ void Box2DBackend2D::step(float deltaTime) {
             ev.kind  = 4;  // sensor exit
             ev.bodyA  = bodyOf(e.sensorShapeId);
             ev.bodyB  = bodyOf(e.visitorShapeId);
+            if(ev.bodyA) ev.layerA=_impl->bodyLayer[handleIndex(ev.bodyA)];
             _impl->collisionEventQueue.push_back(ev);
             ++_collisionEventCount;
         }
@@ -324,6 +331,98 @@ void Box2DBackend2D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
     }
 }
 
+void Box2DBackend2D::appendDebugSnapshot(PhysicsDebugSnapshot& out) {
+    if(!_impl || !b2World_IsValid(_impl->worldId)) return;
+    using V=ayt::math::FVector3;
+    auto cv=[](b2Vec2 p)->V{return {p.x,p.y,0};};
+    auto owner=[&](b2BodyId id){return resolveBodyHandle(id,_impl->bodyIdByIndex,_impl->bodyGeneration,_impl->maxBodies);};
+    for(auto i:_impl->liveBodyIndices) {
+        const auto id=_impl->bodyIdByIndex[i]; if(!b2Body_IsValid(id)) continue;
+        PhysicsDebugRecord r; r.dimension=PhysicsDimension::TwoD; r.category=PhysicsDebugCategory::Motion;
+        r.body=owner(id); r.layer=_impl->bodyLayer[i]; r.anchor=cv(b2Body_GetPosition(id)); r.velocity=cv(b2Body_GetLinearVelocity(id));r.desiredVelocity=_impl->desiredVelocity[i];
+        r.label=b2Body_IsAwake(id)?"Velocity (awake)":"Velocity (sleeping/static)";
+        r.lines.push_back({r.anchor,r.anchor+r.velocity*.25f,0xff00ff00}); out.append(r);
+        if(!(out.categories&(1u<<2))) continue;
+        const int capacity=std::min(b2Body_GetContactCapacity(id),1024);
+        std::vector<b2ContactData> contacts(capacity);
+        const int count=b2Body_GetContactData(id,contacts.data(),capacity);
+        for(int n=0;n<count;++n) {
+            const auto& c=contacts[n]; const auto a=owner(b2Shape_GetBody(c.shapeIdA)),b=owner(b2Shape_GetBody(c.shapeIdB));
+            if(a!=r.body) continue;
+            for(int p=0;p<c.manifold.pointCount;++p) {
+                PhysicsDebugRecord contact; contact.dimension=PhysicsDimension::TwoD; contact.category=PhysicsDebugCategory::Contact;
+                contact.body=a; contact.otherBody=b; contact.layer=r.layer; contact.label="Contact stay (solved)";
+                const auto& point=c.manifold.points[p]; contact.anchor=cv(point.point);contact.hitPoint=contact.anchor;contact.normal=cv(c.manifold.normal);
+                contact.impulse=point.totalNormalImpulse; contact.impulseAvailable=true;
+                contact.lines.push_back({contact.anchor,contact.anchor+cv(c.manifold.normal)*.5f,0xff00ffff});
+                contact.lines.push_back({contact.anchor,contact.anchor+cv(c.manifold.normal)*std::min(contact.impulse,10.f),0xffff00ff});
+                out.append(std::move(contact));
+            }
+        }
+    }
+    for(uint32_t i=1;i<_impl->maxBodies;++i) {
+        if(!(out.categories&1u)) break;
+        const auto id=_impl->shapeIdByIndex[i]; if(!_impl->colliderGeneration[i] || !b2Shape_IsValid(id)) continue;
+        const auto body=b2Shape_GetBody(id);
+        PhysicsDebugRecord r; r.dimension=PhysicsDimension::TwoD; r.category=PhysicsDebugCategory::Collider;
+        r.body=owner(body); r.collider=makeHandle(i,_impl->colliderGeneration[i]); r.layer=_impl->bodyLayer[handleIndex(r.body)];
+        r.anchor=cv(b2Body_GetPosition(body)); r.label=b2Shape_IsSensor(id)?"Native sensor":"Native collider";
+        const uint32_t color=b2Shape_IsSensor(id)?0xffffff00:0xff00c8ff;
+        auto world=[&](b2Vec2 p){return cv(b2Body_GetWorldPoint(body,p));};
+        auto circle=[&](b2Vec2 center,float radius) {
+            const auto c=world(center);
+            for(int n=0;n<32;++n) {const float a=n*6.2831853f/32,b=(n+1)*6.2831853f/32;
+                r.lines.push_back({c+V{std::cos(a)*radius,std::sin(a)*radius,0},c+V{std::cos(b)*radius,std::sin(b)*radius,0},color});}
+        };
+        switch(b2Shape_GetType(id)) {
+        case b2_circleShape: {auto c=b2Shape_GetCircle(id); circle(c.center,c.radius); break;}
+        case b2_capsuleShape: {
+            auto c=b2Shape_GetCapsule(id); auto axis=b2Normalize(b2Sub(c.center2,c.center1)); const b2Vec2 normal{-axis.y*c.radius,axis.x*c.radius};
+            // Native capsule boundary: semicircle at each end, joined by the two tangents.
+            const float angle=std::atan2(axis.y,axis.x);
+            for(int end=0;end<2;++end) for(int n=0;n<16;++n) {
+                const float a=angle+(end?-.5f:.5f)*3.14159265f+n*3.14159265f/16,b=a+3.14159265f/16;
+                const auto c0=end?c.center2:c.center1;
+                r.lines.push_back({world(b2Add(c0,{std::cos(a)*c.radius,std::sin(a)*c.radius})),world(b2Add(c0,{std::cos(b)*c.radius,std::sin(b)*c.radius})),color});
+            }
+            for(float sign:{-1.f,1.f}) r.lines.push_back({world(b2Add(c.center1,b2MulSV(sign,normal))),world(b2Add(c.center2,b2MulSV(sign,normal))),color});
+            break;
+        }
+        case b2_polygonShape: {auto p=b2Shape_GetPolygon(id); for(int n=0;n<p.count;++n) r.lines.push_back({world(p.vertices[n]),world(p.vertices[(n+1)%p.count]),color}); break;}
+        case b2_segmentShape: {auto p=b2Shape_GetSegment(id); r.lines.push_back({world(p.point1),world(p.point2),color}); break;}
+        case b2_chainSegmentShape: {auto p=b2Shape_GetChainSegment(id).segment; r.lines.push_back({world(p.point1),world(p.point2),color}); break;}
+        default: break;
+        }
+        out.append(std::move(r));
+    }
+    for(uint32_t i=1;i<_impl->maxBodies;++i) {
+        if(!(out.categories&(1u<<5))) break;
+        const auto id=_impl->jointIdByIndex[i]; if(!_impl->jointGeneration[i] || !b2Joint_IsValid(id)) continue;
+        const auto a=b2Joint_GetBodyA(id),b=b2Joint_GetBodyB(id);
+        PhysicsDebugRecord r; r.dimension=PhysicsDimension::TwoD; r.category=PhysicsDebugCategory::Joint;
+        r.body=owner(a);r.layer=_impl->bodyLayer[handleIndex(r.body)]; r.otherBody=owner(b); r.queryId=makeHandle(i,_impl->jointGeneration[i]); r.label="Native joint anchors/axis";
+        r.anchor=cv(b2Body_GetWorldPoint(a,b2Joint_GetLocalAnchorA(id))); const auto end=cv(b2Body_GetWorldPoint(b,b2Joint_GetLocalAnchorB(id)));
+        const auto axis=cv(b2Body_GetWorldVector(a,b2Joint_GetLocalAxisA(id)));
+        r.lines={{r.anchor,end,0xffffff00},{r.anchor,r.anchor+axis*.5f,0xff0000ff},{end,end+V{0,0,.3f},0xffff0000}};
+        if(b2Joint_GetType(id)==b2_distanceJoint) {
+            const auto delta=end-r.anchor; const auto dir=delta.lengthSq()>1e-10f?delta.normalize():V{1,0,0};
+            r.lines.push_back({r.anchor+dir*b2DistanceJoint_GetMinLength(id),r.anchor+dir*b2DistanceJoint_GetMaxLength(id),0xffff00ff});
+        }
+        if(b2Joint_GetType(id)==b2_prismaticJoint && b2PrismaticJoint_IsLimitEnabled(id)) {
+            r.lines.push_back({r.anchor+axis*b2PrismaticJoint_GetLowerLimit(id),r.anchor+axis*b2PrismaticJoint_GetUpperLimit(id),0xffff00ff});
+            r.label+=" translation="+std::to_string(b2PrismaticJoint_GetTranslation(id));
+        }
+        if(b2Joint_GetType(id)==b2_revoluteJoint && b2RevoluteJoint_IsLimitEnabled(id)) {
+            const float low=b2RevoluteJoint_GetLowerLimit(id),high=b2RevoluteJoint_GetUpperLimit(id);
+            r.label+=" angle="+std::to_string(b2RevoluteJoint_GetAngle(id));
+            for(int n=0;n<32;++n) {const float reference=b2Rot_GetAngle(b2Body_GetRotation(a))+b2Joint_GetReferenceAngle(id);
+            const float x=reference+low+(high-low)*n/32.f,y=reference+low+(high-low)*(n+1)/32.f;
+                r.lines.push_back({r.anchor+V{std::cos(x)*.4f,std::sin(x)*.4f,0},r.anchor+V{std::cos(y)*.4f,std::sin(y)*.4f,0},0xffff00ff});}
+        }
+        out.append(std::move(r));
+    }
+}
+
 void Box2DBackend2D::execute(const PhysicsCommand& cmd,
                              const PhysicsCreatePayload* createPayload) {
     ++_commandCount;
@@ -365,6 +464,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         _impl->bodyGeneration[idx]  = static_cast<uint16_t>(handleGeneration(cmd.body));
         // A5: stash per-body filter so CreateCollider can build the right b2Filter.
         _impl->bodyLayer[idx]        = d.layer;
+        _impl->desiredVelocity[idx]=d.linearVelocity;
         _impl->bodyCollideMask[idx]  = d.collideMask;
         _impl->liveBodyPosition[idx] =
             static_cast<uint32_t>(_impl->liveBodyIndices.size());
@@ -458,6 +558,7 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         }
         const b2BodyId bodyId = _impl->bodyIdByIndex[idx];
         if (!b2Body_IsValid(bodyId)) { ++_notFoundCount; return; }
+        _impl->desiredVelocity[idx]={cmd.u.vec4.x,cmd.u.vec4.y,0};
         b2Body_SetLinearVelocity(bodyId, b2Vec2{cmd.u.vec4.x, cmd.u.vec4.y});
         b2Body_SetAwake(bodyId, true);
         return;
@@ -878,111 +979,21 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         return;
     }
 
-    case CT::RaycastAsync: {
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
-        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
-
-        const b2Vec2 origin{cmd.u.ray.ox, cmd.u.ray.oy};
-        b2Vec2 dir{cmd.u.ray.dx, cmd.u.ray.dy};
-        const float len = b2Length(dir);
-        if (len > 1.0e-8f) {
-            dir = b2MulSV(kRayCastMaxDistance / len, dir);
-        } else {
-            dir = b2Vec2{0.0f, kRayCastMaxDistance};
-        }
-
-        const b2RayResult hit =
-            b2World_CastRayClosest(_impl->worldId, origin, dir, filter);
-
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        if (hit.hit && b2Shape_IsValid(hit.shapeId)) {
-            qr.hitCount = 1;
-            RaycastHit& rh = qr.hits.emplace_back();
-            rh.hit         = true;
-            const b2BodyId bodyId = b2Shape_GetBody(hit.shapeId);
-            rh.body        = resolveBodyHandle(bodyId, _impl->bodyIdByIndex,
-                                               _impl->bodyGeneration, _impl->maxBodies);
-            rh.collider = resolveColliderHandle(hit.shapeId,_impl->shapeIdByIndex,
-                _impl->colliderGeneration,_impl->maxBodies);
-            rh.point       = ayt::math::FVector3(hit.point.x, hit.point.y, 0.0f);
-            rh.normal      = ayt::math::FVector3(hit.normal.x, hit.normal.y, 0.0f);
-            rh.distance    = hit.fraction * kRayCastMaxDistance;
-        }
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(qr));
-        return;
-    }
-
-    case CT::OverlapSphereAsync: {
-        // A3: 2D overlap = AABB query around the sphere's AABB.
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
-        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
-        const b2Vec2 center{cmd.u.sphere.cx, cmd.u.sphere.cy};
-        const float  r       = cmd.u.sphere.radius;
-        b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - r, center.y - r};
-        aabb.upperBound = b2Vec2{center.x + r, center.y + r};
-
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        struct Ctx { Box2DBackend2D::Impl* impl; std::vector<RaycastHit>* out; };
-        Ctx ctx{_impl.get(), &qr.hits};
-        auto cb = [](b2ShapeId shapeId, void* userData) -> bool {
-            Ctx* c = static_cast<Ctx*>(userData);
-            const b2BodyId bid = b2Shape_GetBody(shapeId);
-            const BodyHandle h = resolveBodyHandle(bid, c->impl->bodyIdByIndex,
-                c->impl->bodyGeneration, c->impl->maxBodies);
-            if (h != InvalidBodyHandle) {
-                RaycastHit& rh = c->out->emplace_back();
-                rh.hit  = true;
-                rh.body = h;
-            }
-            return true;  // continue querying
-        };
-        b2World_OverlapAABB(_impl->worldId, aabb, filter, cb, &ctx);
-        qr.hitCount = static_cast<uint32_t>(qr.hits.size());
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(qr));
-        return;
-    }
-
+    case CT::RaycastAsync:
+    case CT::OverlapSphereAsync:
     case CT::OverlapBoxAsync: {
-        // R1: 2D box overlap as a real axis-aligned rectangle (independent hx/hy),
-        // not the old square proxy that reused the sphere payload.
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits      = static_cast<uint64_t>(cmd.layerMask);
-        filter.categoryBits  = ~0ull;  // P3: query as "all categories" so it hits any shape whose mask accepts >=1 category (b2ShouldQueryCollide checks shape.maskBits & query.categoryBits)
-        const b2Vec2 center{cmd.u.box.cx, cmd.u.box.cy};
-        const float  hx = cmd.u.box.hx >= 0.0f ? cmd.u.box.hx : 0.0f;
-        const float  hy = cmd.u.box.hy >= 0.0f ? cmd.u.box.hy : 0.0f;
-        b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - hx, center.y - hy};
-        aabb.upperBound = b2Vec2{center.x + hx, center.y + hy};
-
-        QueryResult qr{};
-        qr.queryId = cmd.queryId;
-        struct Ctx { Box2DBackend2D::Impl* impl; std::vector<RaycastHit>* out; };
-        Ctx ctx{_impl.get(), &qr.hits};
-        auto cb = [](b2ShapeId shapeId, void* userData) -> bool {
-            Ctx* c = static_cast<Ctx*>(userData);
-            const b2BodyId bid = b2Shape_GetBody(shapeId);
-            const BodyHandle h = resolveBodyHandle(bid, c->impl->bodyIdByIndex,
-                c->impl->bodyGeneration, c->impl->maxBodies);
-            if (h != InvalidBodyHandle) {
-                RaycastHit& rh = c->out->emplace_back();
-                rh.hit  = true;
-                rh.body = h;
-            }
-            return true;
-        };
-        b2World_OverlapAABB(_impl->worldId, aabb, filter, cb, &ctx);
-        qr.hitCount = static_cast<uint32_t>(qr.hits.size());
-        std::lock_guard<std::mutex> lk(_impl->asyncQueryMu);
-        _impl->asyncQueryQueue.push_back(std::move(qr));
-        return;
+        SyncQueryRequest req; req.requestId=cmd.queryId; req.layerMask=cmd.layerMask;
+        if(cmd.type==CT::RaycastAsync) { req.type=SyncQueryType::Raycast;
+            req.ray.origin={cmd.u.ray.ox,cmd.u.ray.oy,cmd.u.ray.oz}; req.ray.dir={cmd.u.ray.dx,cmd.u.ray.dy,cmd.u.ray.dz};
+        } else if(cmd.type==CT::OverlapSphereAsync) {req.type=SyncQueryType::OverlapSphere; req.sphereCenter={cmd.u.sphere.cx,cmd.u.sphere.cy,cmd.u.sphere.cz};req.sphereRadius=cmd.u.sphere.radius;
+        } else { req.type=SyncQueryType::OverlapBox; req.boxCenter={cmd.u.box.cx,cmd.u.box.cy,cmd.u.box.cz}; req.boxHalfExtents={cmd.u.box.hx,cmd.u.box.hy,cmd.u.box.hz}; }
+        SyncQueryResponse response; executeSync(req,response);
+        QueryResult result; result.queryId=cmd.queryId; result.status=response.status;
+        result.dimension=PhysicsDimension::TwoD;
+        if(response.firstHit.hit) result.hits.push_back(response.firstHit);
+        for(auto body:response.overlaps) {RaycastHit hit; hit.hit=true;hit.body=body;result.hits.push_back(hit);}
+        result.hitCount=static_cast<uint32_t>(result.hits.size());result.completedAtUs=ayt::time::Clock::performanceNowUs();
+        std::lock_guard<std::mutex> lock(_impl->asyncQueryMu); _impl->asyncQueryQueue.push_back(std::move(result)); return;
     }
 
     case CT::WakeAll: {
@@ -1049,54 +1060,21 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         }
         return;
     }
-    case SyncQueryType::OverlapSphere: {
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits      = static_cast<uint64_t>(request.layerMask);
-        filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
-        const b2Vec2 center{request.sphereCenter.x, request.sphereCenter.y};
-        const float  r       = request.sphereRadius;
-        b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - r, center.y - r};
-        aabb.upperBound = b2Vec2{center.x + r, center.y + r};
-
-        struct Ctx { Box2DBackend2D::Impl* impl; std::vector<BodyHandle>* out; };
-        Ctx ctx{_impl.get(), &outResponse.overlaps};
-        auto cb = [](b2ShapeId shapeId, void* userData) -> bool {
-            Ctx* c = static_cast<Ctx*>(userData);
-            const b2BodyId bid = b2Shape_GetBody(shapeId);
-            const BodyHandle h = resolveBodyHandle(bid, c->impl->bodyIdByIndex,
-                c->impl->bodyGeneration, c->impl->maxBodies);
-            if (h != InvalidBodyHandle) c->out->push_back(h);
-            return true;
-        };
-        b2World_OverlapAABB(_impl->worldId, aabb, filter, cb, &ctx);
-        return;
-    }
+    case SyncQueryType::OverlapSphere:
     case SyncQueryType::OverlapBox: {
-        // R1: real axis-aligned rectangle (independent hx/hy) from the box request
-        // fields, not the old sphere-payload square proxy.
-        b2QueryFilter filter = b2DefaultQueryFilter();
-        filter.maskBits      = static_cast<uint64_t>(request.layerMask);
-        filter.categoryBits  = ~0ull;  // P3: query as "all categories" (see async path)
-        const b2Vec2 center{request.boxCenter.x, request.boxCenter.y};
-        const float  hx = request.boxHalfExtents.x >= 0.0f ? request.boxHalfExtents.x : 0.0f;
-        const float  hy = request.boxHalfExtents.y >= 0.0f ? request.boxHalfExtents.y : 0.0f;
-        b2AABB aabb{};
-        aabb.lowerBound = b2Vec2{center.x - hx, center.y - hy};
-        aabb.upperBound = b2Vec2{center.x + hx, center.y + hy};
-
-        struct Ctx { Box2DBackend2D::Impl* impl; std::vector<BodyHandle>* out; };
-        Ctx ctx{_impl.get(), &outResponse.overlaps};
-        auto cb = [](b2ShapeId shapeId, void* userData) -> bool {
-            Ctx* c = static_cast<Ctx*>(userData);
-            const b2BodyId bid = b2Shape_GetBody(shapeId);
-            const BodyHandle h = resolveBodyHandle(bid, c->impl->bodyIdByIndex,
-                c->impl->bodyGeneration, c->impl->maxBodies);
-            if (h != InvalidBodyHandle) c->out->push_back(h);
-            return true;
-        };
-        b2World_OverlapAABB(_impl->worldId, aabb, filter, cb, &ctx);
-        return;
+        const bool sphere=request.type==SyncQueryType::OverlapSphere;
+        const auto c=sphere?request.sphereCenter:request.boxCenter;
+        const auto h=request.boxHalfExtents; const auto radius=request.sphereRadius;
+        if(!std::isfinite(c.x)||!std::isfinite(c.y)||(sphere?(!std::isfinite(radius)||radius<=0):(!std::isfinite(h.x)||!std::isfinite(h.y)||h.x<=0||h.y<=0))) {outResponse.status=PhysResult::InvalidParam;return;}
+        b2Vec2 points[4]={{c.x,c.y},{c.x,c.y},{c.x,c.y},{c.x,c.y}};
+        if(!sphere) {points[0]={c.x-h.x,c.y-h.y};points[1]={c.x+h.x,c.y-h.y};points[2]={c.x+h.x,c.y+h.y};points[3]={c.x-h.x,c.y+h.y};}
+        const auto proxy=b2MakeProxy(points,sphere?1:4,sphere?radius:0);
+        b2QueryFilter filter=b2DefaultQueryFilter(); filter.maskBits=request.layerMask;filter.categoryBits=~0ull;
+        struct Context {Impl* impl;std::vector<BodyHandle>* out;};Context context{_impl.get(),&outResponse.overlaps};
+        auto callback=[](b2ShapeId shape,void* data)->bool {auto& c=*static_cast<Context*>(data);
+            const auto h=resolveBodyHandle(b2Shape_GetBody(shape),c.impl->bodyIdByIndex,c.impl->bodyGeneration,c.impl->maxBodies);
+            if(h && std::find(c.out->begin(),c.out->end(),h)==c.out->end()) c.out->push_back(h);return true;};
+        b2World_OverlapShape(_impl->worldId,&proxy,filter,callback,&context);return;
     }
     }
 }

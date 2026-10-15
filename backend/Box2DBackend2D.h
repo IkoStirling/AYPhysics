@@ -23,6 +23,7 @@ public:
     bool  start(const PhysicsBackendInfo& info) override;
     void  stop() override;
     void  step(float deltaTime) override;
+    void appendDebugSnapshot(PhysicsDebugSnapshot& snapshot) override;
     void  publishSnapshot(PhysFrameSnapshot& outSnapshot) override;
     void  execute(const PhysicsCommand& cmd,
                   const PhysicsCreatePayload* createPayload) override;

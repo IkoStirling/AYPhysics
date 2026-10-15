@@ -5,6 +5,7 @@ project(AYPhysics_Tests)
 set(TEST_TARGET AYPhysics_Tests)
 
 add_executable(${TEST_TARGET}
+    Test_PhysicsDebugSnapshot.cpp
     Test_PhysicsDebugDraw.cpp
     main.cpp
     Test_PhysicsTypes.cpp

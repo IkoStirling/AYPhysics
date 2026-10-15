@@ -1280,29 +1280,35 @@ PR description must tick:
 | Q-P3 | Soft max on `transforms.size()`? | Warn at `maxBodies * 0.9` active; do not truncate silently |
 | Q-P4 | 2D backend perf parity? | Decide with §4.2; Box2D likely single-threaded |
 
-## Query diagnostic history (2026-10-14)
+## Debug visualization (2026-10-15)
 
-PhysicsManager owns a game-thread PhysicsDebugDraw value service. Synchronous
-world APIs record only after receiving their mailbox response; timeout is an
-error-colored attempted query. No backend access, command wire, frame snapshot,
-simulation state or event semantics change. Capture is disabled by default.
+Configure the manager-owned PhysicsDebugDraw on the game thread. Synchronous
+and asynchronous 2D/3D queries retain their real result, dimension, request ID,
+mask, hit bodies, point, normal and distance. Green is miss, red hit, yellow
+failure. Async completions are consumed by fetchResults or fetchDebugSnapshot;
+use one game-thread owner. Timed lifetime starts at backend completion.
 
-Geometry uses normalized native ray extent 10000, XY for 2D; successful rays
-add hit-point cross and surface-normal segment. Overlap uses the actual query
-box or sphere/circle, never hit-body bounds as a substitute. The service rejects
-malformed geometry and bounds total retained records/segments. Record is noexcept;
-diagnostic allocation failures return NoMemory without affecting query results.
-Timed expiry starts at completion and uses Clock::performanceNowUs, independent
-of gameplay pause/time scale. A time-source function permits exact boundary
-tests without wall-clock sleeps. consumeLines returns an owned copy, then retires
-only Frame records; settings changes do not reinterpret old lifetimes. Disable
-clears all records. Explicit record supports caller-supplied completed results;
-it neither runs nor authenticates another query. Automatic async capture is
-not implemented; the existing 3D box-async stub is not represented as supported
-geometry/query execution.
+Frame, Timed and Persistent history share a 1024-record / 16384-line budget;
+new records are rejected instead of evicting retained history. Freeze suspends
+capture and expiry; unfreeze shifts timed deadlines. consumeRecords and
+consumeLines are alternative single-consumer APIs. recordGeometry accepts
+explicit adapter observations; diagnostic failure never changes simulation.
 
-Shared colliderLines produces Box/Sphere/Capsule wires from descriptor dimensions,
-local offset and body rotation/position, without renderer types or Transform scale.
-Capsule height includes hemispheres, matching both native backends. Editor
-collider enumeration is an ECS authoring/live-pose adapter, not native shape
-snapshot enumeration; advanced shapes and non-ECS bodies are omitted.
+setDebugSnapshotEnabled opts into physics-thread native inspection, with a
+category mask. fetchDebugSnapshot returns an owned, mutex-protected copy;
+ordinary sparse simulation snapshots keep their existing cadence. Native Jolt
+shape triangles include convex hulls, meshes, heightfields, offsets, sleeping
+and static non-ECS bodies. Box2D uses its native circle/capsule/polygon/segment
+shapes. Unsupported or over-budget geometry is counted rather than replaced
+with an AABB. Character capsules, ground state/normal, snap/step ranges,
+requested/actual velocity, joint anchors/axes and available limits are included.
+Contacts retain enter/stay/exit markers; Box2D exposes solved normal impulse.
+Jolt solved contact impulse is unavailable through the current integration and
+is explicitly flagged unavailable. No fabricated force value is displayed.
+
+3D oriented box async queries now transfer a full request through the existing
+out-of-band pool (command remains <=64 bytes). Jolt sphere/box and Box2D
+circle/box overlap use narrowphase geometry and the requested layer mask.
+Deterministic physics instrumentation remains outside this native diagnostic path.
+See PhysicsDebugDrawTests, PhysicsDebugSnapshotTests, JoltColliderHitTests and
+[SDK contract](../../AYDocs/sdk/contracts/common.md#commonphysicsdebug-draw).
