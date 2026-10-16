@@ -97,4 +97,12 @@ TEST_CASE(async_dimensions_do_not_alias_and_expiry_starts_at_completion) {
     const auto records=d.consumeRecords();CHECK(records.size()==2);CHECK(records[0].lines[0].color==o.errorColor);CHECK(records[1].hit);
     nowUs=1100;CHECK(d.consumeRecords().empty());d.complete(result);CHECK(d.consumeRecords().empty());
 }
+TEST_CASE(screen_and_world_geometry_share_history_budget_and_expiry) {
+    nowUs=0;PhysicsDebugDraw draw(clockUs);auto config=options(DebugDrawLifetime::Timed);config.duration=ayt::time::Duration::fromUs(100);CHECK(draw.configure(config)==PhysResult::Ok);
+    PhysicsDebugRecord row;row.category=PhysicsDebugCategory::UI;row.screenLines.resize(PhysicsDebugDraw::kMaxLines);CHECK(draw.recordGeometry(row)==PhysResult::Ok);
+    PhysicsDebugRecord extra;extra.category=PhysicsDebugCategory::Resource;extra.lines.push_back({{0,0,0},{1,0,0},1});CHECK(draw.recordGeometry(extra)==PhysResult::QueueFull);
+    auto snapshot=draw.consumeRecords();CHECK(snapshot.size()==1);if(!snapshot.empty())CHECK(snapshot[0].screenLines.size()==PhysicsDebugDraw::kMaxLines);
+    nowUs=100;CHECK(draw.consumeRecords().empty());CHECK(draw.recordGeometry(extra)==PhysResult::Ok);
+    extra.category=static_cast<PhysicsDebugCategory>(kPhysicsDebugCategoryCount);CHECK(draw.recordGeometry(extra)==PhysResult::InvalidParam);
+}
 TEST_SUITE_END

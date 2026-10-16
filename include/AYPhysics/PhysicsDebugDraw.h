@@ -19,7 +19,9 @@ struct PhysicsDebugLine {
     ayt::math::FVector3 from{}, to{};
     uint32_t color = 0xff00ff00u;
 };
-enum class PhysicsDebugCategory : uint8_t { Collider, Query, Contact, Character, Motion, Joint, Camera, Skeleton, Ability };
+enum class PhysicsDebugCategory : uint8_t { Collider, Query, Contact, Character, Motion, Joint, Camera, Skeleton, Ability, Animation, Combat, Lighting, Audio, Particle, Brain, DeterministicPhysics, PathInteraction, Respawn, Stats, CameraBehavior, UI, Input, Network, Sequence, Resource };
+inline constexpr uint32_t kPhysicsDebugCategoryCount=25;
+inline constexpr uint32_t kPhysicsDebugAllCategories=(1u<<kPhysicsDebugCategoryCount)-1;
 struct PhysicsDebugQuery {
     SyncQueryType type = SyncQueryType::Raycast;
     PhysicsDimension dimension = PhysicsDimension::ThreeD;
@@ -50,9 +52,15 @@ struct PhysicsDebugRecord {
     ayt::math::FVector3 anchor{}, velocity{}, desiredVelocity{}, hitPoint{}, normal{};
     std::string label;
     std::vector<PhysicsDebugLine> lines;
+    /// Owned human-readable state; diagnostic consumers must not execute or parse it as gameplay input.
+    std::string details;
+    /// UI lines use logical screen coordinates, never the world camera.
+    std::vector<PhysicsDebugLine> screenLines;
+    /// Independent event source identity: capture once per record key, without replaying gameplay.
+    bool transientEvent=false;
 };
 struct PhysicsDebugSnapshot {
-    uint32_t categories = 0x1ff;
+    uint32_t categories = kPhysicsDebugAllCategories;
     uint64_t frameIndex = 0;
     float stepSeconds = 0;
     size_t droppedRecords = 0, lineCount = 0;
@@ -64,7 +72,7 @@ struct PhysicsDebugSnapshot {
 
 /// Game-thread diagnostic history, independent of simulation and Renderer.
 /// Timed entries use a monotonic real clock, including while gameplay is paused.
-/// consumeLines copies visible geometry and retires Frame entries only; persistent
+/// consumeLines copies visible world geometry (screenLines require consumeRecords) and retires Frame entries only; persistent
 /// entries live until clear. Limits reject whole records (no eviction of history).
 class PhysicsDebugDraw {
 public:

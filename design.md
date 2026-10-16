@@ -1312,3 +1312,15 @@ circle/box overlap use narrowphase geometry and the requested layer mask.
 Deterministic physics instrumentation remains outside this native diagnostic path.
 See PhysicsDebugDrawTests, PhysicsDebugSnapshotTests, JoltColliderHitTests and
 [SDK contract](../../AYDocs/sdk/contracts/common.md#commonphysicsdebug-draw).
+
+## Debug content extension (2026-10-15)
+
+PhysicsDebugCategory appends Animation/Combat/Lighting/Audio/Particle/Brain at bits9..14 without renumbering existing categories. Owned PhysicsDebugRecord details support numeric/state inspection. Generic history/snapshot budgets and clocks stay shared; native physics inspection still runs on its worker.
+
+Module-local regression sources were updated. Runtime tests and interactive editor acceptance are deferred by the current task request; previous validation reports cover the earlier baseline. These changes remain uncommitted until focused runtime checks are requested and pass.
+
+## Extended diagnostic observations (2026-10-15)
+
+Diagnostic category IDs now extend through Resource (24), with kPhysicsDebugCategoryCount and kPhysicsDebugAllCategories. PhysicsDebugRecord can own logical screenLines and independent transientEvent identity metadata; PhysicsDebugDraw and PhysicsDebugSnapshot count world+screen segments together and reject invalid category IDs/nonfinite geometry. consumeRecords preserves both coordinate spaces; consumeLines is the alternative world-only consumer. Engine service inspection remains in AYEditor, with no renderer/service dependency added to the physics worker.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.

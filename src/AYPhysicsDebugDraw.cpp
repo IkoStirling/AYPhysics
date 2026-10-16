@@ -34,7 +34,7 @@ PhysResult PhysicsDebugDraw::configure(const PhysicsDebugDrawOptions& o) {
 void PhysicsDebugDraw::expire(uint64_t now) {
     for(auto i=_records.begin();i!=_records.end();) {
         if(i->lifetime==DebugDrawLifetime::Timed && now>=i->expires) {
-            _lineCount-=i->value.lines.size(); i=_records.erase(i);
+            _lineCount-=(i->value.lines.size()+i->value.screenLines.size()); i=_records.erase(i);
         } else ++i;
     }
 }
@@ -146,21 +146,22 @@ std::vector<PhysicsDebugRecord> PhysicsDebugDraw::consumeRecords() {
     std::vector<PhysicsDebugRecord> out; out.reserve(_records.size());
     for(auto i=_records.begin();i!=_records.end();) {
         out.push_back(i->value);
-        if(!_frozen && i->lifetime==DebugDrawLifetime::Frame) { _lineCount-=i->value.lines.size(); i=_records.erase(i); }
+        if(!_frozen && i->lifetime==DebugDrawLifetime::Frame) { _lineCount-=(i->value.lines.size()+i->value.screenLines.size()); i=_records.erase(i); }
         else ++i;
     }
     return out;
 }
 PhysResult PhysicsDebugDraw::recordGeometry(PhysicsDebugRecord value) noexcept try {
     if(!_options.enabled || _frozen) return PhysResult::Ok;
+    if(uint32_t(value.category)>=kPhysicsDebugCategoryCount)return PhysResult::InvalidParam;
     const auto now=_clock();expire(now);
-    if(std::any_of(value.lines.begin(),value.lines.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);})) return PhysResult::InvalidParam;
-    if(_records.size()>=kMaxRecords || value.lines.size()>kMaxLines-_lineCount) {++_dropped;return PhysResult::QueueFull;}
+    if(std::any_of(value.lines.begin(),value.lines.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);}) || std::any_of(value.screenLines.begin(),value.screenLines.end(),[](const auto& l){return !finite(l.from)||!finite(l.to);})) return PhysResult::InvalidParam;
+    if(_records.size()>=kMaxRecords || value.lines.size()+value.screenLines.size()>kMaxLines-_lineCount) {++_dropped;return PhysResult::QueueFull;}
     const auto duration=static_cast<uint64_t>(std::max<int64_t>(0,_options.duration.toUs()));
     const auto completed=value.completedAtUs?value.completedAtUs:now;
     value.completedAtUs=completed;
     const auto expires=duration>UINT64_MAX-completed?UINT64_MAX:completed+duration;
-    const auto count=value.lines.size();_records.push_back({std::move(value),_options.lifetime,expires});_lineCount+=count;
+    const auto count=value.lines.size()+value.screenLines.size();_records.push_back({std::move(value),_options.lifetime,expires});_lineCount+=count;
     return PhysResult::Ok;
 } catch(...) {++_dropped;return PhysResult::NoMemory;}
 void PhysicsDebugDraw::setFrozen(bool frozen) noexcept {
@@ -174,7 +175,7 @@ void PhysicsDebugDraw::setFrozen(bool frozen) noexcept {
 }
 void PhysicsDebugDraw::clearCategory(PhysicsDebugCategory category) noexcept {
     for(auto i=_records.begin();i!=_records.end();) if(i->value.category==category) {
-        _lineCount-=i->value.lines.size(); i=_records.erase(i);
+        _lineCount-=(i->value.lines.size()+i->value.screenLines.size()); i=_records.erase(i);
     } else ++i;
     if(category==PhysicsDebugCategory::Query) _pending.clear();
 }
@@ -191,10 +192,11 @@ void PhysicsDebugDraw::complete(const QueryResult& result) {
     (void)record(query,result.status,result.hitCount!=0,result.hits.empty()?nullptr:&result.hits.front(),&bodies);
 }
 bool PhysicsDebugSnapshot::append(PhysicsDebugRecord record) {
+    if(uint32_t(record.category)>=kPhysicsDebugCategoryCount){++droppedRecords;return false;}
     if(!(categories&(1u<<uint32_t(record.category)))) return true;
-    if(records.size()>=PhysicsDebugDraw::kMaxRecords || record.lines.size()>PhysicsDebugDraw::kMaxLines-lineCount) {
+    if(records.size()>=PhysicsDebugDraw::kMaxRecords || record.lines.size()+record.screenLines.size()>PhysicsDebugDraw::kMaxLines-lineCount) {
         ++droppedRecords; return false;
     }
-    lineCount+=record.lines.size(); records.push_back(std::move(record)); return true;
+    lineCount+=record.lines.size()+record.screenLines.size(); records.push_back(std::move(record)); return true;
 }
 } // namespace ayt::physics
