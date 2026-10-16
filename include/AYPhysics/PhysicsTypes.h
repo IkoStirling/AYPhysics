@@ -222,11 +222,22 @@ struct PhysFrameSnapshot {
 // Sync-query request (§5.4 mailbox)
 // =============================================================================
 
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox };
+/// Finite world-space sphere sweep. Displacement length <=10000; radius in (0,1000].
+/// Layer mask filters targets; ignoredBodies are generation-checked handles (at most 64).
+/// Sensors are ignored by default. Distance in RaycastHit is sphere CENTER travel.
+struct SphereSweep {
+    ayt::math::FVector3 origin{}, displacement{};
+    float radius = .2f;
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
     uint32_t      requestId = 0;
+    SphereSweep sphereSweep{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;

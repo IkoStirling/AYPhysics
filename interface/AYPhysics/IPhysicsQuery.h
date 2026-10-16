@@ -32,6 +32,11 @@ public:
                                    RaycastHit& outHit,
                                    PhysLayerMask layerMask = 0xFFFFFFFFu) = 0;
 
+    /// Physics-thread sphere cast. Jolt reports exact collider and center travel distance.
+    /// Initial penetration reports distance 0; failures clear outHit. Unsupported in Null/Mock/2D.
+    virtual PhysResult sphereSweepSync(const SphereSweep&, RaycastHit& outHit) {
+        outHit = {}; return PhysResult::Unsupported;
+    }
     virtual PhysResult overlapSphereSync(const ayt::math::FVector3& center,
                                          float radius,
                                          std::vector<BodyHandle>& out,

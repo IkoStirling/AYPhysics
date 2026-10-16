@@ -45,6 +45,8 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyManager.h>
@@ -1536,6 +1538,45 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
     }
 
     switch (request.type) {
+    case SyncQueryType::SphereSweep: {
+        const auto& query = request.sphereSweep;
+        const float length = query.displacement.length();
+        if (!detail::finiteVector(query.origin) || !detail::finiteVector(query.displacement)
+            || !std::isfinite(length) || length < 1e-6f || length > 10000
+            || !std::isfinite(query.radius) || query.radius <= 0 || query.radius > 1000
+            || query.ignoredBodies.size() > 64) { outResponse.status = PhysResult::InvalidParam; return; }
+        struct Filter final : JPH::BodyFilter {
+            const SphereSweep& query;
+            explicit Filter(const SphereSweep& value) : query(value) {}
+            bool ShouldCollideLocked(const JPH::Body& body) const override {
+                if (!query.includeSensors && body.IsSensor()) return false;
+                const auto handle = static_cast<BodyHandle>(body.GetUserData());
+                return std::find(query.ignoredBodies.begin(),query.ignoredBodies.end(),handle) == query.ignoredBodies.end();
+            }
+        } filter(query);
+        JPH::SphereShape sphere(query.radius);
+        const JPH::RVec3 origin(query.origin.x,query.origin.y,query.origin.z);
+        JPH::RShapeCast cast(&sphere,JPH::Vec3::sReplicate(1),JPH::RMat44::sTranslation(origin),
+            JPH::Vec3(query.displacement.x,query.displacement.y,query.displacement.z));
+        JPH::ShapeCastSettings settings;
+        settings.SetBackFaceMode(JPH::EBackFaceMode::CollideWithBackFaces);
+        settings.mReturnDeepestPoint = true;
+        JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+        QueryLayerFilter layers(query.layerMask);
+        _impl->physicsSystem->GetNarrowPhaseQuery().CastShape(cast,settings,origin,collector,{},layers,filter);
+        outResponse.firstHit = {};
+        if (!collector.HadHit()) return;
+        const auto& result = collector.mHit;
+        auto& hit = outResponse.firstHit;
+        hit.body = handleFromBodyId(result.mBodyID2);
+        hit.collider = colliderFromSubShape(result.mBodyID2,result.mSubShapeID2.GetValue());
+        if (!hit.body || !hit.collider) { hit = {}; outResponse.status = PhysResult::BackendError; return; }
+        hit.hit = true; hit.distance = std::clamp(result.mFraction,0.f,1.f) * length;
+        const auto point = origin + result.mContactPointOn2;
+        hit.point = {float(point.GetX()),float(point.GetY()),float(point.GetZ())};
+        const auto normal = -result.mPenetrationAxis.NormalizedOr(JPH::Vec3::sAxisY());
+        hit.normal = {normal.GetX(),normal.GetY(),normal.GetZ()}; return;
+    }
     case SyncQueryType::Raycast: {
         outResponse.firstHit = {};
         const auto& ray = request.ray;

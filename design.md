@@ -1324,3 +1324,11 @@ Module-local regression sources were updated. Runtime tests and interactive edit
 Diagnostic category IDs now extend through Resource (24), with kPhysicsDebugCategoryCount and kPhysicsDebugAllCategories. PhysicsDebugRecord can own logical screenLines and independent transientEvent identity metadata; PhysicsDebugDraw and PhysicsDebugSnapshot count world+screen segments together and reject invalid category IDs/nonfinite geometry. consumeRecords preserves both coordinate spaces; consumeLines is the alternative world-only consumer. Engine service inspection remains in AYEditor, with no renderer/service dependency added to the physics worker.
 
 Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
+
+## Camera / spatial hierarchy integration (2026-10-14)
+
+Camera controllers bind persistent Entity identity with a World-scoped runtime handle; explicit missing targets cannot rebind by name. Presentation control samples world-space ancestor poses and converts once back to local position/orientation through the same alpha, preserving local scale and refusing singular/sheared parents.
+
+Entity.PhysicsIntegration installs the default Jolt sphere-sweep adapter. Host custom queries override it; collisionEnabled explicitly disables per controller. The finite-volume query ignores sensors/self/target bodies, checks generation handles and reports initial penetration at zero center travel. Null/Mock/2D return Unsupported. Orbit distance plus collision radius/padding implement the camera arm and damped recovery. Explicit manager adapters must be detached before manager destruction.
+
+Editor has stable target selection, collision parameters, and undoable main-window hierarchy dragging. CameraRigProject is a portable visual/authoring fixture; its Wall is visual-only, while AYEntity_CameraRigIntegrationTests exercises actual Jolt wall avoidance, lens effects/blending, self-ignore and recovery. See ../../AYDocs/CAMERA-SYSTEM.md and the integration evidence in ../../AYDocs/ENTITY-SPATIAL-HIERARCHY.md. Native Computer Use acceptance is deferred by user request.

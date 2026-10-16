@@ -1,4 +1,5 @@
 #include "AYPhysics/PhysicsWorld3D.h"
+#include <cmath>
 
 #include "AYPhysics/PhysicsManager.h"
 
@@ -414,6 +415,22 @@ PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     return resp.status;
 }
 
+PhysResult PhysicsWorld3D::sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit) {
+    outHit = {};
+    const auto finite = [](const auto& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+    const auto lengthSq = sweep.displacement.lengthSq();
+    if (!finite(sweep.origin) || !finite(sweep.displacement) || !std::isfinite(lengthSq)
+        || lengthSq < 1e-12f || lengthSq > 10000.f*10000.f || !std::isfinite(sweep.radius)
+        || sweep.radius <= 0 || sweep.radius > 1000 || sweep.ignoredBodies.size() > 64) return PhysResult::InvalidParam;
+    auto* m = _manager;
+    if (!m || !m->isRunning() || !m->syncMailbox()) return PhysResult::InvalidState;
+    SyncQueryRequest request{}; request.type = SyncQueryType::SphereSweep;
+    request.requestId = nextQueryId(); request.sphereSweep = sweep;
+    SyncQueryResponse response{};
+    if (!m->syncMailbox()->submitAndWait(request,response,1000*1000)) return PhysResult::BackendError;
+    if (response.status == PhysResult::Ok) outHit = response.firstHit;
+    return response.status;
+}
 PhysResult PhysicsWorld3D::overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                              std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
