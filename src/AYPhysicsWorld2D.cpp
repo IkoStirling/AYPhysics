@@ -830,6 +830,57 @@ PhysResult PhysicsWorld2D::overlapCapsuleSync(
     }
 }
 
+PhysResult PhysicsWorld2D::overlapCapsuleCollidersSync(
+    const CapsuleOverlap2D& query,
+    std::vector<ColliderOverlapHit2D>& out, uint32_t maxHits) {
+    out.clear();
+    try {
+        if (!std::isfinite(query.center.x) || !std::isfinite(query.center.y)
+            || !std::isfinite(query.center.z)
+            || !std::isfinite(query.radius) || query.radius <= 0.0f
+            || query.radius > 1000.0f || !std::isfinite(query.height)
+            || query.height < 2.0f * query.radius
+            || query.height > 2000.0f
+            || query.ignoredBodies.size() > 64u
+            || maxHits == 0u || maxHits > 1024u) {
+            return PhysResult::InvalidParam;
+        }
+        PhysicsManager* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+            return PhysResult::InvalidState;
+        }
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::CapsuleColliderOverlap2D;
+        request.requestId = nextQueryId();
+        request.capsuleOverlap2D = query;
+        request.maxHits = maxHits;
+        PhysicsDebugQuery debug;
+        debug.type = SyncQueryType::CapsuleColliderOverlap2D;
+        debug.dimension = PhysicsDimension::TwoD;
+        debug.queryId = request.requestId;
+        debug.layerMask = query.layerMask;
+        debug.center = query.center;
+        debug.radius = query.radius;
+        debug.height = query.height;
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox2D()->submitAndWait(
+                request, response, 1000 * 1000)) {
+            (void)manager->debugDraw().record(
+                debug, PhysResult::BackendError, false);
+            return PhysResult::BackendError;
+        }
+        if (response.status == PhysResult::Ok) {
+            out = std::move(response.colliderOverlaps);
+        }
+        (void)manager->debugDraw().record(
+            debug, response.status, !out.empty());
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
+}
+
 PhysResult PhysicsWorld2D::overlapOrientedBoxSync(
     const OrientedBoxOverlap2D& query, std::vector<BodyHandle>& out) {
     out.clear();
@@ -876,6 +927,62 @@ PhysResult PhysicsWorld2D::overlapOrientedBoxSync(
         }
         (void)manager->debugDraw().record(
             debug, response.status, !out.empty(), nullptr, &out);
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
+}
+
+PhysResult PhysicsWorld2D::overlapOrientedBoxCollidersSync(
+    const OrientedBoxOverlap2D& query,
+    std::vector<ColliderOverlapHit2D>& out, uint32_t maxHits) {
+    out.clear();
+    try {
+        const auto finite = [](const auto& value) {
+            return std::isfinite(value.x) && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        };
+        if (!finite(query.center) || !finite(query.halfExtents)
+            || query.halfExtents.x <= 0.0f
+            || query.halfExtents.y <= 0.0f
+            || query.halfExtents.x > 1000.0f
+            || query.halfExtents.y > 1000.0f
+            || !std::isfinite(query.angleRadians)
+            || query.ignoredBodies.size() > 64u
+            || maxHits == 0u || maxHits > 1024u) {
+            return PhysResult::InvalidParam;
+        }
+        PhysicsManager* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+            return PhysResult::InvalidState;
+        }
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::OrientedBoxColliderOverlap2D;
+        request.requestId = nextQueryId();
+        request.orientedBoxOverlap2D = query;
+        request.maxHits = maxHits;
+        PhysicsDebugQuery debug;
+        debug.type = SyncQueryType::OrientedBoxColliderOverlap2D;
+        debug.dimension = PhysicsDimension::TwoD;
+        debug.queryId = request.requestId;
+        debug.layerMask = query.layerMask;
+        debug.center = query.center;
+        debug.halfExtents = query.halfExtents;
+        debug.rotation = ayt::math::FQuaternion::fromAxisAngle(
+            {0.0f, 0.0f, 1.0f}, query.angleRadians);
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox2D()->submitAndWait(
+                request, response, 1000 * 1000)) {
+            (void)manager->debugDraw().record(
+                debug, PhysResult::BackendError, false);
+            return PhysResult::BackendError;
+        }
+        if (response.status == PhysResult::Ok) {
+            out = std::move(response.colliderOverlaps);
+        }
+        (void)manager->debugDraw().record(
+            debug, response.status, !out.empty());
         return response.status;
     } catch (const std::bad_alloc&) {
         out.clear();

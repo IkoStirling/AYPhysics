@@ -32,6 +32,10 @@ and optional sensors; a valid empty result differs from Null `Unsupported`.
 `PhysicsWorld2D::overlapOrientedBoxSync` checks a rotated XY rectangle with the
 same filters and sorted unique body results. Its angle is counterclockwise in
 radians, and it leaves the simulation unchanged; Null 2D returns `Unsupported`.
+`overlapCapsuleCollidersSync` and `overlapOrientedBoxCollidersSync` return exact
+body/collider pairs instead of only unique bodies. Equal capsule height and
+diameter queries a circle; zero box angle queries an axis-aligned rectangle.
+Both use sorted, bounded results and return `OutOfRange` without partial data.
 `PhysicsWorld2D::orientedBoxSweepSync` translates a rotated rectangle while
 holding its angle fixed. It returns the first exact collider, contact geometry
 and center travel distance, with the same filters as the other 2D sweeps;

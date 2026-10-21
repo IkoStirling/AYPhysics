@@ -273,6 +273,11 @@ struct OrientedBoxOverlap2D {
     std::vector<BodyHandle> ignoredBodies;
     bool includeSensors = false;
 };
+/// Exact 2D overlap identity; overlap queries do not infer contact geometry.
+struct ColliderOverlapHit2D {
+    BodyHandle body = InvalidBodyHandle;
+    ColliderHandle collider = InvalidColliderHandle;
+};
 /// Translate a rotated XY rectangle without changing its angle during cast.
 /// Angle is counterclockwise radians; output distance is box-center travel.
 struct OrientedBoxSweep2D {
@@ -291,7 +296,7 @@ struct RaycastAll2D {
     bool includeSensors = false;
     uint32_t maxHits = 64u;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D, SphereSweepAll2D, CapsuleSweepAll2D, OrientedBoxSweepAll2D };
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D, SphereSweepAll2D, CapsuleSweepAll2D, OrientedBoxSweepAll2D, CapsuleColliderOverlap2D, OrientedBoxColliderOverlap2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
@@ -319,6 +324,7 @@ struct SyncQueryResponse {
     RaycastHit firstHit;       // for raycast
     std::vector<RaycastHit> rayHits; // for finite multi-hit queries
     std::vector<BodyHandle> overlaps;  // for overlap
+    std::vector<ColliderOverlapHit2D> colliderOverlaps;
 };
 
 // =============================================================================

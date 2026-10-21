@@ -174,6 +174,15 @@ public:
     PhysResult overlapCapsuleSync(const CapsuleOverlap2D& query,
                                   std::vector<BodyHandle>& out);
     /**
+     * @brief Return every exact collider overlapping an upright XY capsule.
+     * A capsule with height == 2*radius is a circle. Geometry/filters match
+     * overlapCapsuleSync; maxHits is 1..1024. Results sort by body/collider.
+     * Errors, including OutOfRange, clear output; Null 2D is Unsupported.
+     * Contact point and penetration depth are not reported. Waits for worker.
+     */
+    PhysResult overlapCapsuleCollidersSync(const CapsuleOverlap2D& query,
+        std::vector<ColliderOverlapHit2D>& out, uint32_t maxHits = 64u);
+    /**
      * Find bodies inside a counterclockwise rotated XY rectangle.
      * Finite center, angle and half-extents are required; XY extents are in
      * (0,1000]. Z is validated but ignored by Box2D. Layer, sensor and up to
@@ -183,6 +192,16 @@ public:
      */
     PhysResult overlapOrientedBoxSync(const OrientedBoxOverlap2D& query,
                                       std::vector<BodyHandle>& out);
+    /**
+     * @brief Return every exact collider inside a rotated XY rectangle.
+     * Angle zero is an axis-aligned box. Geometry/filters match the body-only
+     * overlap query; maxHits is 1..1024. Results sort by body/collider.
+     * Errors clear output; Null 2D is Unsupported. No contact geometry is
+     * inferred. Call from the game thread; waits for the physics worker.
+     */
+    PhysResult overlapOrientedBoxCollidersSync(
+        const OrientedBoxOverlap2D& query,
+        std::vector<ColliderOverlapHit2D>& out, uint32_t maxHits = 64u);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);

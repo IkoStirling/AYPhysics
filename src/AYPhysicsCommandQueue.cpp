@@ -288,11 +288,13 @@ void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
             resp.firstHit = {};
             resp.overlaps.clear();
             resp.rayHits.clear();
+            resp.colliderOverlaps.clear();
         } catch (...) {
             resp.status = PhysResult::BackendError;
             resp.firstHit = {};
             resp.overlaps.clear();
             resp.rayHits.clear();
+            resp.colliderOverlaps.clear();
         }
         slot.response = std::move(resp);
         slot.ready.store(true, std::memory_order_release);

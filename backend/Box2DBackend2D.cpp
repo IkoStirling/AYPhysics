@@ -1123,6 +1123,56 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
                 });
         }
     };
+    struct ColliderOverlapContext {
+        Impl* impl;
+        const std::vector<BodyHandle>* ignoredBodies;
+        SyncQueryResponse* response;
+        uint32_t maxHits;
+        bool includeSensors;
+    };
+    const auto acceptColliderOverlap = [](b2ShapeId shape,
+                                          void* data) -> bool {
+        auto& query = *static_cast<ColliderOverlapContext*>(data);
+        if (!b2Shape_IsValid(shape)
+            || (!query.includeSensors && b2Shape_IsSensor(shape))) {
+            return true;
+        }
+        const BodyHandle body = resolveBodyHandle(b2Shape_GetBody(shape),
+            query.impl->bodyIdByIndex, query.impl->bodyGeneration,
+            query.impl->maxBodies);
+        const ColliderHandle collider = resolveColliderHandle(shape,
+            query.impl->shapeIdByIndex, query.impl->colliderGeneration,
+            query.impl->maxBodies);
+        if (!body || !collider
+            || std::find(query.ignoredBodies->begin(),
+                query.ignoredBodies->end(), body)
+                != query.ignoredBodies->end()) return true;
+        auto& hits = query.response->colliderOverlaps;
+        if (hits.size() >= query.maxHits) {
+            query.response->status = PhysResult::OutOfRange;
+            return false;
+        }
+        try {
+            hits.push_back({body, collider});
+        } catch (...) {
+            query.response->status = PhysResult::NoMemory;
+            return false;
+        }
+        return true;
+    };
+    const auto finishColliderOverlap = [&outResponse]() {
+        if (outResponse.status != PhysResult::Ok) {
+            outResponse.colliderOverlaps.clear();
+        } else {
+            std::sort(outResponse.colliderOverlaps.begin(),
+                outResponse.colliderOverlaps.end(),
+                [](const ColliderOverlapHit2D& a,
+                   const ColliderOverlapHit2D& b) {
+                    if (a.body != b.body) return a.body < b.body;
+                    return a.collider < b.collider;
+                });
+        }
+    };
 
     switch (request.type) {
     case SyncQueryType::SphereSweep: {
@@ -1429,6 +1479,38 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         }
         return;
     }
+    case SyncQueryType::OrientedBoxColliderOverlap2D: {
+        const OrientedBoxOverlap2D& query = request.orientedBoxOverlap2D;
+        const float sine = std::sin(query.angleRadians);
+        const float cosine = std::cos(query.angleRadians);
+        const float hx = query.halfExtents.x;
+        const float hy = query.halfExtents.y;
+        const b2Vec2 local[4] = {
+            {-hx, -hy}, {hx, -hy}, {hx, hy}, {-hx, hy}};
+        b2Vec2 corners[4];
+        for (int index = 0; index < 4; ++index) {
+            corners[index] = {
+                query.center.x + cosine * local[index].x
+                    - sine * local[index].y,
+                query.center.y + sine * local[index].x
+                    + cosine * local[index].y};
+            if (!std::isfinite(corners[index].x)
+                || !std::isfinite(corners[index].y)) {
+                outResponse.status = PhysResult::InvalidParam;
+                return;
+            }
+        }
+        const b2ShapeProxy proxy = b2MakeProxy(corners, 4, 0.0f);
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(query.layerMask);
+        filter.categoryBits = ~0ull;
+        ColliderOverlapContext context{_impl.get(), &query.ignoredBodies,
+            &outResponse, request.maxHits, query.includeSensors};
+        b2World_OverlapShape(_impl->worldId, &proxy, filter,
+                             acceptColliderOverlap, &context);
+        finishColliderOverlap();
+        return;
+    }
     case SyncQueryType::OrientedBoxOverlap2D: {
         const OrientedBoxOverlap2D& query = request.orientedBoxOverlap2D;
         const float sine = std::sin(query.angleRadians);
@@ -1489,6 +1571,24 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         } else {
             std::sort(outResponse.overlaps.begin(), outResponse.overlaps.end());
         }
+        return;
+    }
+    case SyncQueryType::CapsuleColliderOverlap2D: {
+        const CapsuleOverlap2D& query = request.capsuleOverlap2D;
+        const float halfSegment = 0.5f * query.height - query.radius;
+        const b2Vec2 centers[2] = {
+            {query.center.x, query.center.y - halfSegment},
+            {query.center.x, query.center.y + halfSegment}};
+        const b2ShapeProxy proxy = b2MakeProxy(centers,
+            halfSegment == 0.0f ? 1 : 2, query.radius);
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(query.layerMask);
+        filter.categoryBits = ~0ull;
+        ColliderOverlapContext context{_impl.get(), &query.ignoredBodies,
+            &outResponse, request.maxHits, query.includeSensors};
+        b2World_OverlapShape(_impl->worldId, &proxy, filter,
+                             acceptColliderOverlap, &context);
+        finishColliderOverlap();
         return;
     }
     case SyncQueryType::CapsuleOverlap2D: {

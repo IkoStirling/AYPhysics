@@ -49,6 +49,8 @@ void NullBackend3D::executeSync(const SyncQueryRequest& request,
         || request.type == SyncQueryType::SphereSweepAll2D
         || request.type == SyncQueryType::CapsuleSweepAll2D
         || request.type == SyncQueryType::OrientedBoxSweepAll2D
+        || request.type == SyncQueryType::CapsuleColliderOverlap2D
+        || request.type == SyncQueryType::OrientedBoxColliderOverlap2D
         || request.type == SyncQueryType::OrientedBoxSweep2D
         || request.type == SyncQueryType::CapsuleSweep2D
         || request.type == SyncQueryType::CapsuleOverlap2D

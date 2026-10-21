@@ -46,6 +46,8 @@ void NullBackend2D::executeSync(const SyncQueryRequest& request,
         || request.type == SyncQueryType::CapsuleSweep2D
         || request.type == SyncQueryType::CapsuleOverlap2D
         || request.type == SyncQueryType::OrientedBoxOverlap2D
+        || request.type == SyncQueryType::CapsuleColliderOverlap2D
+        || request.type == SyncQueryType::OrientedBoxColliderOverlap2D
         || request.type == SyncQueryType::RaycastAll2D
         ? PhysResult::Unsupported : PhysResult::Ok;
 }

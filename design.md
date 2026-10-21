@@ -1489,3 +1489,18 @@ has zero travel/normal. Overflow discards the whole result and returns
 `OutOfRange`; allocation failure is `NoMemory`, Null 2D is `Unsupported`,
 and a valid empty `Ok` is a miss. Debug history draws the swept shape and
 first contact. All queries are read-only and remain on the worker mailbox.
+
+## Exact collider overlap collection in 2D (2026-10-22)
+
+`overlapCapsuleCollidersSync` and `overlapOrientedBoxCollidersSync` reuse the
+existing upright capsule and rotated rectangle geometry. A capsule with
+height equal to diameter is a circle; a rotated box with angle zero is an
+axis-aligned rectangle. Unlike the older body-only overlap queries, these
+return one `{body, collider}` pair per accepted Box2D shape, retaining
+multiple colliders on one body. They use the same layer, sensor and ignored
+body filters, finite input limits and worker mailbox, with an explicit 1..1024
+result cap (default 64). Results sort by body then collider. A valid empty
+`Ok` is a miss; overflow returns `OutOfRange` without a partial array,
+allocation failure returns `NoMemory`, and Null 2D returns `Unsupported`.
+Debug history draws the query outline and records hit status; no contact
+point, normal or penetration depth is inferred from an overlap callback.
