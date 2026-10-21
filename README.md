@@ -25,6 +25,10 @@ The shared synchronous query mailbox retains a slot while a timed-out request
 is still executing on the physics worker. Its late response is discarded and
 the slot returns to the pool only after backend execution finishes, so a new
 query cannot receive a prior request's result.
+2D and 3D body, collider and joint creation now require a running manager.
+`NoMemory` and `QueueFull` leave the output handle invalid and preserve the
+next handle index and generation. Repeated rejected requests therefore cannot
+exhaust the handle range before a creation is accepted.
 `PhysicsWorld2D::raycastAllSync` casts a finite XY segment and returns every
 eligible exact collider hit in distance order. It supports layer masks,
 ignored bodies and optional sensors; its explicit hit limit rejects overflow

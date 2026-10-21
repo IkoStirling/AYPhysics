@@ -32,6 +32,9 @@ public:
     /// Copy the latest completed-step state; NotFound before creation/after removal.
     PhysResult getCharacterState(CharacterHandle h, CharacterController3DState& outState);
 
+    /** Queue creation on a running manager. Ok publishes a handle for a body
+     * created during the next step; rejection clears outHandle and does not
+     * consume a handle index or generation. */
     PhysResult createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle);
     PhysResult    destroyRigidbody(BodyHandle h);
     PhysResult    setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p, const ayt::math::FQuaternion& r);
@@ -55,9 +58,11 @@ public:
 
     /// Append a collider to this body's compound. Deletion removes its geometry.
     /// Jolt sensor/material properties are body-wide; mixed sensor/solid shapes reject.
+    /// Failed admission leaves outHandle invalid without consuming a handle.
     PhysResult    createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult    destroyCollider(ColliderHandle h);
 
+    /// Failed admission leaves outHandle invalid without consuming a handle.
     PhysResult    createJoint(const JointDesc& desc, JointHandle& outHandle);
     PhysResult    destroyJoint(JointHandle h);
 

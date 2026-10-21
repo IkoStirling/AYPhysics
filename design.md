@@ -436,7 +436,7 @@ private:
 };
 ```
 
-**Create flow:** `createRigidbody(desc, out)` → allocate handle (index+gen) → `createPool.allocate({Rigidbody, desc})` → `tryPush({CreateRigidbody, body, createSlot})` → `out = body`, return `Ok`. If pool or queue full → roll back slot/handle, `out = InvalidBodyHandle`, return `QueueFull` / `NoMemory` (no silent drop on create).
+**Create flow:** `createRigidbody(desc, out)` checks the running manager, then mints a candidate handle (index+gen) → `createPool.allocate({Rigidbody, desc})` → `tryPush({CreateRigidbody, body, createSlot})` → `out = body`, return `Ok`. If pool or queue full, it releases any create slot, restores the local index and generation counters, sets `out = InvalidBodyHandle`, and returns `QueueFull` / `NoMemory` (no silent drop or handle-range consumption on rejected create). The same admission rule applies to 2D/3D body, collider and joint creation.
 
 ### 5.3 Result snapshot (sparse active-body)
 

@@ -12,6 +12,9 @@ namespace ayt::physics {
 class PhysicsManager;
 class PhysicsWorld2D {
 public:
+    /** Queue creation on a running manager. Ok publishes a handle for a body
+     * created during the next step; rejection clears outHandle and does not
+     * consume a handle index or generation. */
     PhysResult createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle);
     PhysResult destroyRigidbody(BodyHandle h);
     PhysResult setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p,
@@ -28,9 +31,11 @@ public:
     // replaces RigidbodyDesc::collideMask for all shapes on the body.
     PhysResult setRigidbodyCollideMask(BodyHandle h, PhysLayerMask newMask);
 
+    /** Queue collider creation with the same admission and handle rules as bodies. */
     PhysResult createCollider(const ColliderDesc& desc, ColliderHandle& outHandle);
     PhysResult destroyCollider(ColliderHandle h);
 
+    /** Queue joint creation with the same admission and handle rules as bodies. */
     PhysResult createJoint(const JointDesc& desc, JointHandle& outHandle);
     PhysResult destroyJoint(JointHandle h);
 

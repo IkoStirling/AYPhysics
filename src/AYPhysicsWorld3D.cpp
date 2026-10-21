@@ -37,10 +37,9 @@ Handle PhysicsWorld3D::mintHandle(uint32_t& indexSlot, uint32_t& genSlot) noexce
     // backend handle validation (design §7.1 / §17.4). 0 is reserved.
     const uint32_t freshGen = bumpGeneration(genSlot);
 
-    // Only commit the bump after both checks succeed. Rolling back means
-    // the next successful mint gets the SAME index with the NEXT generation,
-    // so no two mints ever share (idx, gen) — but we also don't skip a gen
-    // number on the failure path.
+    // Only commit the bump after both checks succeed. If later command
+    // admission fails, the caller restores both counters: this unpublished
+    // handle pair can be used by the next accepted creation.
     indexSlot = nextIndex;
     genSlot   = freshGen;
 
@@ -61,18 +60,26 @@ uint32_t PhysicsWorld3D::nextQueryId() noexcept {
 PhysResult PhysicsWorld3D::createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle) {
     outHandle = InvalidBodyHandle;
     PhysicsManager* m = _manager;
-    if (!m || !m->createPool() || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextBodyIndex;
+    const uint32_t previousGen = _nextBodyGen;
     outHandle = mintHandle<BodyHandle>(_nextBodyIndex, _nextBodyGen);
     if (outHandle == InvalidBodyHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextBodyIndex = previousIndex;
+        _nextBodyGen = previousGen;
+        outHandle = InvalidBodyHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Rigidbody;
     payload.rigidDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidBodyHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -80,12 +87,10 @@ PhysResult PhysicsWorld3D::createRigidbody(const RigidbodyDesc& desc, BodyHandle
     cmd.body = outHandle;
     cmd.createSlot = slotId;
     if (!m->commandQueue()->tryPush(cmd)) {
-        // Roll back the slot. The handle is "in flight" but never observed;
-        // physics thread will see an unknown handle on its create-pool take
-        // path and just drop it (R1 Null/Mock: no-op). Caller sees QueueFull.
+        // The command was never published: release the payload and restore
+        // the local mint counters so backpressure cannot consume handle space.
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidBodyHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }
@@ -250,18 +255,26 @@ PhysResult PhysicsWorld3D::setMaterial(ColliderHandle h, float friction, float r
 PhysResult PhysicsWorld3D::createCollider(const ColliderDesc& desc, ColliderHandle& outHandle) {
     outHandle = InvalidColliderHandle;
     PhysicsManager* m = _manager;
-    if (!m) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextColliderIndex;
+    const uint32_t previousGen = _nextColliderGen;
     outHandle = mintHandle<ColliderHandle>(_nextColliderIndex, _nextColliderGen);
     if (outHandle == InvalidColliderHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextColliderIndex = previousIndex;
+        _nextColliderGen = previousGen;
+        outHandle = InvalidColliderHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Collider;
     payload.colliderDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidColliderHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -270,8 +283,7 @@ PhysResult PhysicsWorld3D::createCollider(const ColliderDesc& desc, ColliderHand
     cmd.createSlot = slotId;
     if (!m->commandQueue()->tryPush(cmd)) {
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidColliderHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }
@@ -294,18 +306,26 @@ PhysResult PhysicsWorld3D::destroyCollider(ColliderHandle h) {
 PhysResult PhysicsWorld3D::createJoint(const JointDesc& desc, JointHandle& outHandle) {
     outHandle = InvalidJointHandle;
     PhysicsManager* m = _manager;
-    if (!m) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextJointIndex;
+    const uint32_t previousGen = _nextJointGen;
     outHandle = mintHandle<JointHandle>(_nextJointIndex, _nextJointGen);
     if (outHandle == InvalidJointHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextJointIndex = previousIndex;
+        _nextJointGen = previousGen;
+        outHandle = InvalidJointHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Joint;
     payload.jointDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidJointHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -314,8 +334,7 @@ PhysResult PhysicsWorld3D::createJoint(const JointDesc& desc, JointHandle& outHa
     cmd.createSlot = slotId;
     if (!m->commandQueue()->tryPush(cmd)) {
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidJointHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }

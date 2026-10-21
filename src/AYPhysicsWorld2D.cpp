@@ -33,18 +33,26 @@ uint32_t PhysicsWorld2D::nextQueryId() noexcept {
 PhysResult PhysicsWorld2D::createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle) {
     outHandle = InvalidBodyHandle;
     PhysicsManager* m = _manager;
-    if (!m || !m->createPool() || !m->commandQueue2D()) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue2D()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextBodyIndex;
+    const uint32_t previousGen = _nextBodyGen;
     outHandle = mintHandle<BodyHandle>(_nextBodyIndex, _nextBodyGen);
     if (outHandle == InvalidBodyHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextBodyIndex = previousIndex;
+        _nextBodyGen = previousGen;
+        outHandle = InvalidBodyHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Rigidbody;
     payload.rigidDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidBodyHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -53,8 +61,7 @@ PhysResult PhysicsWorld2D::createRigidbody(const RigidbodyDesc& desc, BodyHandle
     cmd.createSlot = slotId;
     if (!m->commandQueue2D()->tryPush(cmd)) {
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidBodyHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }
@@ -149,18 +156,26 @@ PhysResult PhysicsWorld2D::setRigidbodyCollideMask(BodyHandle h, PhysLayerMask n
 PhysResult PhysicsWorld2D::createCollider(const ColliderDesc& desc, ColliderHandle& outHandle) {
     outHandle = InvalidColliderHandle;
     PhysicsManager* m = _manager;
-    if (!m) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue2D()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextColliderIndex;
+    const uint32_t previousGen = _nextColliderGen;
     outHandle = mintHandle<ColliderHandle>(_nextColliderIndex, _nextColliderGen);
     if (outHandle == InvalidColliderHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextColliderIndex = previousIndex;
+        _nextColliderGen = previousGen;
+        outHandle = InvalidColliderHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Collider;
     payload.colliderDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidColliderHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -169,8 +184,7 @@ PhysResult PhysicsWorld2D::createCollider(const ColliderDesc& desc, ColliderHand
     cmd.createSlot = slotId;
     if (!m->commandQueue2D()->tryPush(cmd)) {
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidColliderHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }
@@ -189,18 +203,26 @@ PhysResult PhysicsWorld2D::destroyCollider(ColliderHandle h) {
 PhysResult PhysicsWorld2D::createJoint(const JointDesc& desc, JointHandle& outHandle) {
     outHandle = InvalidJointHandle;
     PhysicsManager* m = _manager;
-    if (!m) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->createPool()
+        || !m->commandQueue2D()) return PhysResult::InvalidState;
 
+    const uint32_t previousIndex = _nextJointIndex;
+    const uint32_t previousGen = _nextJointGen;
     outHandle = mintHandle<JointHandle>(_nextJointIndex, _nextJointGen);
     if (outHandle == InvalidJointHandle) return PhysResult::OutOfRange;
+    const auto reject = [&](PhysResult result) {
+        _nextJointIndex = previousIndex;
+        _nextJointGen = previousGen;
+        outHandle = InvalidJointHandle;
+        return result;
+    };
 
     PhysicsCreatePayload payload{};
     payload.kind = PhysicsCreatePayload::Kind::Joint;
     payload.jointDesc = desc;
     const CreateSlotId slotId = m->createPool()->allocate(payload);
     if (slotId == InvalidCreateSlotId) {
-        outHandle = InvalidJointHandle;
-        return PhysResult::NoMemory;
+        return reject(PhysResult::NoMemory);
     }
 
     PhysicsCommand cmd{};
@@ -209,8 +231,7 @@ PhysResult PhysicsWorld2D::createJoint(const JointDesc& desc, JointHandle& outHa
     cmd.createSlot = slotId;
     if (!m->commandQueue2D()->tryPush(cmd)) {
         (void)m->createPool()->take(slotId, payload);
-        outHandle = InvalidJointHandle;
-        return PhysResult::QueueFull;
+        return reject(PhysResult::QueueFull);
     }
     return PhysResult::Ok;
 }

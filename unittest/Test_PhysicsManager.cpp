@@ -2,6 +2,7 @@
 #include "AYPhysics/PhysicsWorld3D.h"
 #include "AYPhysics/PhysicsWorld2D.h"
 #include "AYPhysics/PhysicsTypes.h"
+#include "AYPhysics/PhysicsCommandQueue.h"
 
 #include "AYTest.h"
 
@@ -84,6 +85,85 @@ TEST_SUITE(PhysicsManagerTests)
         CHECK_INT_EQ(static_cast<uint32_t>(r1), static_cast<uint32_t>(PhysResult::Ok));
         CHECK(isValidHandle(h1));
         mgr->shutdown();
+    }
+
+    TEST_CASE(CreateBackpressureDoesNotConsumeTwoOrThreeDimensionalHandles) {
+        PhysicsBackendDescriptor desc;
+        desc.kind3D = BackendKind::Null;
+        desc.kind2D = BackendKind::Null;
+        desc.maxBodies = 3u;
+        desc.createPoolCapacity = 1u;
+        auto mgr = PhysicsManager::create(desc);
+        CHECK_NOT_NULL(mgr.get());
+        PhysicsWorld2D* world2D = mgr->world2D();
+        PhysicsWorld3D* world3D = mgr->world3D();
+        PhysicsCreatePayload held{};
+        const CreateSlotId slot = mgr->createPool()->allocate(held);
+        CHECK_TRUE(slot != InvalidCreateSlotId);
+        RigidbodyDesc bodyDesc;
+        ColliderDesc colliderDesc;
+        JointDesc jointDesc;
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            BodyHandle body2D = makeHandle(42u, 1u);
+            BodyHandle body3D = makeHandle(42u, 1u);
+            ColliderHandle collider2D = makeHandle(42u, 1u);
+            ColliderHandle collider3D = makeHandle(42u, 1u);
+            JointHandle joint2D = makeHandle(42u, 1u);
+            JointHandle joint3D = makeHandle(42u, 1u);
+            CHECK_TRUE(world2D->createRigidbody(bodyDesc, body2D)
+                == PhysResult::NoMemory);
+            CHECK_TRUE(world3D->createRigidbody(bodyDesc, body3D)
+                == PhysResult::NoMemory);
+            CHECK_TRUE(world2D->createCollider(colliderDesc, collider2D)
+                == PhysResult::NoMemory);
+            CHECK_TRUE(world3D->createCollider(colliderDesc, collider3D)
+                == PhysResult::NoMemory);
+            CHECK_TRUE(world2D->createJoint(jointDesc, joint2D)
+                == PhysResult::NoMemory);
+            CHECK_TRUE(world3D->createJoint(jointDesc, joint3D)
+                == PhysResult::NoMemory);
+            CHECK_INT_EQ(body2D, InvalidBodyHandle);
+            CHECK_INT_EQ(body3D, InvalidBodyHandle);
+            CHECK_INT_EQ(collider2D, InvalidColliderHandle);
+            CHECK_INT_EQ(collider3D, InvalidColliderHandle);
+            CHECK_INT_EQ(joint2D, InvalidJointHandle);
+            CHECK_INT_EQ(joint3D, InvalidJointHandle);
+        }
+        CHECK_TRUE(mgr->createPool()->take(slot, held));
+
+        BodyHandle body2D = InvalidBodyHandle;
+        BodyHandle body3D = InvalidBodyHandle;
+        CHECK_TRUE(world2D->createRigidbody(bodyDesc, body2D) == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(body2D), 1u);
+        CHECK_TRUE(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+        CHECK_TRUE(world3D->createRigidbody(bodyDesc, body3D) == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(body3D), 1u);
+        CHECK_TRUE(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+
+        ColliderHandle collider2D = InvalidColliderHandle;
+        ColliderHandle collider3D = InvalidColliderHandle;
+        colliderDesc.body = body2D;
+        CHECK_TRUE(world2D->createCollider(colliderDesc, collider2D)
+            == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(collider2D), 1u);
+        CHECK_TRUE(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+        colliderDesc.body = body3D;
+        CHECK_TRUE(world3D->createCollider(colliderDesc, collider3D)
+            == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(collider3D), 1u);
+        CHECK_TRUE(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+
+        JointHandle joint2D = InvalidJointHandle;
+        JointHandle joint3D = InvalidJointHandle;
+        CHECK_TRUE(world2D->createJoint(jointDesc, joint2D) == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(joint2D), 1u);
+        CHECK_TRUE(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+        CHECK_TRUE(world3D->createJoint(jointDesc, joint3D) == PhysResult::Ok);
+        CHECK_INT_EQ(handleIndex(joint3D), 1u);
+        mgr->shutdown();
+        CHECK_TRUE(world2D->createRigidbody(bodyDesc, body2D)
+            == PhysResult::InvalidState);
+        CHECK_INT_EQ(body2D, InvalidBodyHandle);
     }
 
     TEST_CASE(LockstepStubDoesNotBlockNullStep) {
