@@ -1473,3 +1473,6 @@ input, unavailable manager, allocation failure and backend failure also
 clear output; a completed empty `Ok` result is a miss, and Null 2D returns
 `Unsupported`. Debug history draws the start/end boxes and path with the
 first accepted contact. The query does not change body state.
+The Box2D worker's multi-hit shape callback owns common filtering, result
+budget, exact handle resolution and ordering, so future swept shapes can use
+the same failure and tie behavior.

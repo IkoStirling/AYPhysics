@@ -1064,6 +1064,66 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         return fraction;
     };
 
+    struct SweepAllContext {
+        Impl* impl;
+        const std::vector<BodyHandle>* ignoredBodies;
+        SyncQueryResponse* response;
+        float travel;
+        uint32_t maxHits;
+        bool includeSensors;
+    };
+    const auto acceptAllSweep = [](b2ShapeId shape, b2Vec2 point,
+                                   b2Vec2 normal, float fraction,
+                                   void* data) -> float {
+        auto& cast = *static_cast<SweepAllContext*>(data);
+        if (!b2Shape_IsValid(shape)
+            || (!cast.includeSensors && b2Shape_IsSensor(shape))) {
+            return -1.0f;
+        }
+        const BodyHandle body = resolveBodyHandle(b2Shape_GetBody(shape),
+            cast.impl->bodyIdByIndex, cast.impl->bodyGeneration,
+            cast.impl->maxBodies);
+        const ColliderHandle collider = resolveColliderHandle(shape,
+            cast.impl->shapeIdByIndex, cast.impl->colliderGeneration,
+            cast.impl->maxBodies);
+        if (!body || !collider
+            || std::find(cast.ignoredBodies->begin(),
+                cast.ignoredBodies->end(), body)
+                != cast.ignoredBodies->end()) return -1.0f;
+        auto& hits = cast.response->rayHits;
+        if (hits.size() >= cast.maxHits) {
+            cast.response->status = PhysResult::OutOfRange;
+            return 0.0f;
+        }
+        RaycastHit hit;
+        hit.hit = true;
+        hit.body = body;
+        hit.collider = collider;
+        hit.point = {point.x, point.y, 0.0f};
+        hit.normal = {normal.x, normal.y, 0.0f};
+        hit.distance = fraction * cast.travel;
+        try {
+            hits.push_back(hit);
+        } catch (...) {
+            cast.response->status = PhysResult::NoMemory;
+            return 0.0f;
+        }
+        return 1.0f;
+    };
+    const auto finishAllSweep = [&outResponse]() {
+        if (outResponse.status != PhysResult::Ok) {
+            outResponse.rayHits.clear();
+        } else {
+            std::sort(outResponse.rayHits.begin(),
+                outResponse.rayHits.end(),
+                [](const RaycastHit& a, const RaycastHit& b) {
+                    if (a.distance != b.distance) return a.distance < b.distance;
+                    if (a.body != b.body) return a.body < b.body;
+                    return a.collider < b.collider;
+                });
+        }
+    };
+
     switch (request.type) {
     case SyncQueryType::SphereSweep: {
         const SphereSweep& sweep = request.sphereSweep;
@@ -1122,66 +1182,14 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits = static_cast<uint64_t>(sweep.layerMask);
         filter.categoryBits = ~0ull;
-        struct SweepContext {
-            Impl* impl;
-            const BoxSweep2D* sweep;
-            SyncQueryResponse* response;
-            float travel;
-            uint32_t maxHits;
-        } context{_impl.get(), &sweep, &outResponse,
+        SweepAllContext context{_impl.get(), &sweep.ignoredBodies,
+            &outResponse,
             std::sqrt(sweep.displacement.x * sweep.displacement.x
                       + sweep.displacement.y * sweep.displacement.y),
-            request.maxHits};
-        auto accept = [](b2ShapeId shape, b2Vec2 point, b2Vec2 normal,
-                         float fraction, void* data) -> float {
-            auto& cast = *static_cast<SweepContext*>(data);
-            if (!b2Shape_IsValid(shape)
-                || (!cast.sweep->includeSensors && b2Shape_IsSensor(shape))) {
-                return -1.0f;
-            }
-            const BodyHandle body = resolveBodyHandle(b2Shape_GetBody(shape),
-                cast.impl->bodyIdByIndex, cast.impl->bodyGeneration,
-                cast.impl->maxBodies);
-            const ColliderHandle collider = resolveColliderHandle(shape,
-                cast.impl->shapeIdByIndex, cast.impl->colliderGeneration,
-                cast.impl->maxBodies);
-            if (!body || !collider
-                || std::find(cast.sweep->ignoredBodies.begin(),
-                    cast.sweep->ignoredBodies.end(), body)
-                    != cast.sweep->ignoredBodies.end()) return -1.0f;
-            auto& hits = cast.response->rayHits;
-            if (hits.size() >= cast.maxHits) {
-                cast.response->status = PhysResult::OutOfRange;
-                return 0.0f;
-            }
-            RaycastHit hit;
-            hit.hit = true;
-            hit.body = body;
-            hit.collider = collider;
-            hit.point = {point.x, point.y, 0.0f};
-            hit.normal = {normal.x, normal.y, 0.0f};
-            hit.distance = fraction * cast.travel;
-            try {
-                hits.push_back(hit);
-            } catch (...) {
-                cast.response->status = PhysResult::NoMemory;
-                return 0.0f;
-            }
-            return 1.0f;
-        };
+            request.maxHits, sweep.includeSensors};
         b2World_CastShape(_impl->worldId, &proxy, translation, filter,
-                          accept, &context);
-        if (outResponse.status != PhysResult::Ok) {
-            outResponse.rayHits.clear();
-        } else {
-            std::sort(outResponse.rayHits.begin(),
-                outResponse.rayHits.end(),
-                [](const RaycastHit& a, const RaycastHit& b) {
-                    if (a.distance != b.distance) return a.distance < b.distance;
-                    if (a.body != b.body) return a.body < b.body;
-                    return a.collider < b.collider;
-                });
-        }
+                          acceptAllSweep, &context);
+        finishAllSweep();
         return;
     }
     case SyncQueryType::OrientedBoxSweep2D: {
