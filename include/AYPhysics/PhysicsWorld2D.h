@@ -97,6 +97,17 @@ public:
      */
     PhysResult boxSweepSync(const BoxSweep2D& sweep, RaycastHit& outHit);
     /**
+     * @brief Cast a fixed-angle rotated XY rectangle to its closest hit.
+     * Finite center, displacement, angle and positive XY half-extents are
+     * required. Each extent is at most 1000; XY travel is [0.000001,10000].
+     * Layer, sensor and up to 64 ignored-body filters apply. Z is validated
+     * but ignored. Distance is box-center travel, including zero on initial
+     * overlap. Output is cleared on failure or miss; Null 2D is Unsupported.
+     * Call on the game thread; the query waits for the physics worker.
+     */
+    PhysResult orientedBoxSweepSync(const OrientedBoxSweep2D& sweep,
+                                    RaycastHit& outHit);
+    /**
      * @brief Sweep an upright XY capsule and return the closest accepted hit.
      * @param sweep Finite center and travel; radius (0,1000], total height
      * [2*radius,2000], XY travel [0.000001,10000]. At most 64 body handles

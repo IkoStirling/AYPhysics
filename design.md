@@ -1443,3 +1443,18 @@ failure and allocation failure also clear the output; Null 2D reports
 `Unsupported`. Empty `Ok` means a completed miss. The query reads the current
 physics world without moving bodies or changing lockstep authority. Debug
 history draws the actual finite segment and first accepted contact.
+
+## 2D oriented box sweep query (2026-10-22)
+
+`PhysicsWorld2D::orientedBoxSweepSync` casts a rectangle translated along a
+finite XY vector while holding its counterclockwise XY angle fixed. Center,
+displacement, half-extents and angle must be finite; each XY half-extent is in
+(0, 1000], XY travel length in [0.000001, 10000], and at most 64 body handles
+may be ignored. Box2D receives the four rotated world-space corners as a
+zero-radius convex proxy and a translation vector. It returns the closest
+accepted exact body/collider, surface point and normal, and center travel
+distance. Layer and optional sensor filters match other 2D sweeps. Initial
+overlap has zero distance and normal. Misses and failures clear output; Null
+2D returns `Unsupported`. Debug history draws the starting and ending rotated
+outlines and the travel line. This read-only query never rotates or moves an
+existing physics body and does not perform collision response.

@@ -1107,6 +1107,42 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
                           acceptSweep, &context);
         return;
     }
+    case SyncQueryType::OrientedBoxSweep2D: {
+        const OrientedBoxSweep2D& sweep = request.orientedBoxSweep2D;
+        const float sine = std::sin(sweep.angleRadians);
+        const float cosine = std::cos(sweep.angleRadians);
+        const float hx = sweep.halfExtents.x;
+        const float hy = sweep.halfExtents.y;
+        const b2Vec2 local[4] = {
+            {-hx, -hy}, {hx, -hy}, {hx, hy}, {-hx, hy}};
+        b2Vec2 corners[4];
+        for (int index = 0; index < 4; ++index) {
+            corners[index] = {
+                sweep.origin.x + cosine * local[index].x
+                    - sine * local[index].y,
+                sweep.origin.y + sine * local[index].x
+                    + cosine * local[index].y};
+            if (!std::isfinite(corners[index].x)
+                || !std::isfinite(corners[index].y)) {
+                outResponse.status = PhysResult::InvalidParam;
+                return;
+            }
+        }
+        const b2ShapeProxy proxy = b2MakeProxy(corners, 4, 0.0f);
+        const b2Vec2 translation{sweep.displacement.x,
+                                 sweep.displacement.y};
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(sweep.layerMask);
+        filter.categoryBits = ~0ull;
+        CastContext context{
+            _impl.get(), &sweep.ignoredBodies, &outResponse,
+            std::sqrt(sweep.displacement.x * sweep.displacement.x
+                      + sweep.displacement.y * sweep.displacement.y),
+            sweep.includeSensors};
+        b2World_CastShape(_impl->worldId, &proxy, translation, filter,
+                          acceptSweep, &context);
+        return;
+    }
     case SyncQueryType::CapsuleSweep2D: {
         const CapsuleSweep2D& sweep = request.capsuleSweep2D;
         const float halfSegment = 0.5f * sweep.height - sweep.radius;
