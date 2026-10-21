@@ -86,6 +86,20 @@ public:
      * worker and must never be called from that worker.
      */
     PhysResult boxSweepSync(const BoxSweep2D& sweep, RaycastHit& outHit);
+    /**
+     * @brief Sweep an upright XY capsule and return the closest accepted hit.
+     * @param sweep Finite center and travel; radius (0,1000], total height
+     * [2*radius,2000], XY travel [0.000001,10000]. At most 64 body handles
+     * may be ignored. Z is validated but ignored by Box2D.
+     * @param outHit Cleared on failure or miss. Distance is capsule-center
+     * travel; starting contact reports zero. Sensors require includeSensors.
+     * @return Ok for a completed query, InvalidParam for a bad request,
+     * InvalidState when the manager is unavailable, BackendError on timeout,
+     * or Unsupported on the Null 2D backend.
+     * @threading Call from the game/simulation thread; waits for the physics
+     * worker and must never be called from that worker.
+     */
+    PhysResult capsuleSweepSync(const CapsuleSweep2D& sweep, RaycastHit& outHit);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);

@@ -1372,3 +1372,19 @@ or alter a body. Debug capture shows both rectangle outlines, center path,
 and accepted contact when present. This is a read-only gameplay query, not
 deterministic lockstep state and not a 3D box sweep. Tests cover hit ordering,
 filtering, non-square dimensions, initial contact, invalid input and Null.
+
+## 2D capsule sweep query (2026-10-22)
+
+`PhysicsWorld2D::capsuleSweepSync` casts an upright XY capsule without changing
+its orientation. Its total height includes the round ends, matching the Box2D
+capsule collider: radius is in (0, 1000], height is in [2*radius, 2000], XY
+translation length is in [0.000001, 10000], and at most 64 body handles may be
+ignored. Every vector component must be finite, though Box2D ignores Z. An
+equal-height-and-diameter capsule uses a one-point circle proxy.
+
+The 2D mailbox returns the nearest accepted generation-checked body and exact
+collider, contact point and normal, and capsule-center travel. Starting contact
+has zero distance. Layer masks, sensor inclusion, clear-on-failure behavior and
+Null-backend `Unsupported` match circle and box sweeps. Debug history draws the
+upright start/end capsule and center path. This is a read-only query, separate
+from controller motion ownership and deterministic collision state.

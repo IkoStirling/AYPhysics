@@ -12,6 +12,10 @@ the Null 2D backend reports `Unsupported`.
 independent half-extents through the same worker mailbox. It reports the
 closest exact collider and center travel, with the same filters and clear-on-
 failure behavior as circle sweep; Null 2D reports `Unsupported`.
+`PhysicsWorld2D::capsuleSweepSync` casts an upright XY capsule with total height
+including its round ends. It reports the closest collider and center travel,
+supports the same filters and failure behavior, and accepts a circular capsule
+when height equals diameter. Null 2D reports `Unsupported`.
 Jolt now preserves multiple colliders as a compound, removes their geometry on
 destruction, honors ray layer masks and returns real surface normals. Body-only
 overlaps do not identify an individual shape.

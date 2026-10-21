@@ -28,6 +28,7 @@ struct PhysicsDebugQuery {
     ayt::math::Ray ray{};
     ayt::math::FVector3 center{}, halfExtents{}, displacement{};
     float radius = 0;
+    float height = 0;
     ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
     uint32_t queryId = 0;
     PhysLayerMask layerMask = 0xffffffffu;

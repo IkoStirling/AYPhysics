@@ -1539,6 +1539,7 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
 
     switch (request.type) {
     case SyncQueryType::BoxSweep2D:
+    case SyncQueryType::CapsuleSweep2D:
         outResponse.status = PhysResult::Unsupported;
         return;
     case SyncQueryType::SphereSweep: {

@@ -45,6 +45,7 @@ void NullBackend3D::executeSync(const SyncQueryRequest& request,
     outResponse.requestId = request.requestId;
     outResponse.status = request.type == SyncQueryType::SphereSweep
         || request.type == SyncQueryType::BoxSweep2D
+        || request.type == SyncQueryType::CapsuleSweep2D
         ? PhysResult::Unsupported : PhysResult::Ok;
     // hits remain default (RaycastHit{hit=false}); overlaps empty.
 }

@@ -113,22 +113,28 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
             line(lines,p,p+detail->normal*0.5f,c);
         }
     } else if(q.type==SyncQueryType::SphereSweep
-              || q.type==SyncQueryType::BoxSweep2D) {
+              || q.type==SyncQueryType::BoxSweep2D
+              || q.type==SyncQueryType::CapsuleSweep2D) {
         const bool box=q.type==SyncQueryType::BoxSweep2D;
+        const bool capsule=q.type==SyncQueryType::CapsuleSweep2D;
         if(q.dimension!=PhysicsDimension::TwoD || !finite(q.center)
             || !finite(q.displacement)
             || (box ? (!finite(q.halfExtents)||q.halfExtents.x<=0
                        || q.halfExtents.y<=0)
-                    : (!std::isfinite(q.radius)||q.radius<=0)))
+                    : (!std::isfinite(q.radius)||q.radius<=0
+                       || (capsule && (!std::isfinite(q.height)
+                           || q.height<2*q.radius)))))
             return PhysResult::InvalidParam;
         const V start{q.center.x,q.center.y,0};
         const V end{q.center.x+q.displacement.x,
                     q.center.y+q.displacement.y,0};
         if(!finite(end)) return PhysResult::InvalidParam;
-        if(box) {
+        if(box || capsule) {
             ColliderDesc shape;
-            shape.shape=ColliderShape::Box;
+            shape.shape=box?ColliderShape::Box:ColliderShape::Capsule;
             shape.halfExtents=q.halfExtents;
+            shape.radius=q.radius;
+            shape.height=q.height;
             lines=colliderLines(shape,start,
                 ayt::math::FQuaternion::identity(),q.dimension,c);
             auto finalLines=colliderLines(shape,end,
@@ -159,7 +165,7 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
     value.category=PhysicsDebugCategory::Query; value.dimension=q.dimension;
     value.queryId=q.queryId; value.layerMask=q.layerMask; value.status=result; value.hit=hit;
     value.anchor=q.type==SyncQueryType::Raycast?q.ray.origin:q.center;
-    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::SphereSweep?"Circle sweep":q.type==SyncQueryType::BoxSweep2D?"Box sweep":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
+    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::SphereSweep?"Circle sweep":q.type==SyncQueryType::BoxSweep2D?"Box sweep":q.type==SyncQueryType::CapsuleSweep2D?"Capsule sweep":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
     if(detail) { value.body=detail->body; value.collider=detail->collider; value.distance=detail->distance;value.hitPoint=detail->point;value.normal=detail->normal; }
     if(overlaps) {value.hitBodies=*overlaps;if(!value.body && !overlaps->empty())value.body=overlaps->front();}
     else if(detail && detail->body) value.hitBodies.push_back(detail->body);

@@ -243,13 +243,25 @@ struct BoxSweep2D {
     std::vector<BodyHandle> ignoredBodies;
     bool includeSensors = false;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D };
+/// Upright XY capsule sweep for PhysicsWorld2D; total height includes ends.
+/// Radius in (0,1000], height in [2*radius,2000], XY travel <=10000.
+/// Equal height and diameter casts a circle. Distance is center travel.
+struct CapsuleSweep2D {
+    ayt::math::FVector3 origin{}, displacement{};
+    float radius = 0.5f;
+    float height = 2.0f;
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
     uint32_t      requestId = 0;
     SphereSweep sphereSweep{};
     BoxSweep2D boxSweep2D{};
+    CapsuleSweep2D capsuleSweep2D{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;
