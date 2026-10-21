@@ -1538,6 +1538,9 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
     }
 
     switch (request.type) {
+    case SyncQueryType::BoxSweep2D:
+        outResponse.status = PhysResult::Unsupported;
+        return;
     case SyncQueryType::SphereSweep: {
         const auto& query = request.sphereSweep;
         const float length = query.displacement.length();

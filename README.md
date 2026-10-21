@@ -8,6 +8,10 @@ The 2D world also offers a finite XY circle sweep through the existing
 body/collider, contact point and normal, and circle-center travel distance.
 It supports layer masks, ignored bodies, optional sensors and initial overlap;
 the Null 2D backend reports `Unsupported`.
+`PhysicsWorld2D::boxSweepSync` casts an axis-aligned XY rectangle with
+independent half-extents through the same worker mailbox. It reports the
+closest exact collider and center travel, with the same filters and clear-on-
+failure behavior as circle sweep; Null 2D reports `Unsupported`.
 Jolt now preserves multiple colliders as a compound, removes their geometry on
 destruction, honors ray layer masks and returns real surface normals. Body-only
 overlaps do not identify an individual shape.

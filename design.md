@@ -1352,3 +1352,23 @@ hit/miss, filters, initial overlap, rejected inputs, and shutdown behavior.
 When query debugging is enabled, the completed sweep records its start/end
 circle, center path, accepted contact, and result status in the existing
 bounded debug history.
+
+## 2D box sweep query (2026-10-22)
+
+`PhysicsWorld2D::boxSweepSync` accepts an axis-aligned finite XY rectangle and
+translation. Both half-extents must be in (0, 1,000], XY travel in
+[0.000001, 10,000], and at most 64 body handles may be ignored. Z components
+are validated for finiteness but ignored by Box2D. The existing 2D sync
+mailbox returns the nearest accepted body and exact collider, contact point,
+surface normal, and rectangle-center travel distance. A shape starting in
+contact reports zero distance. Layer masks and optional sensors follow the
+circle sweep contract. A miss clears the hit; invalid input, unavailable
+manager, backend failure, and Null 2D also clear it. Null 2D returns
+`Unsupported` for a valid query.
+
+The Box2D implementation casts a four-point zero-radius proxy through the
+same world query path used by circle sweeps. It does not rotate during travel
+or alter a body. Debug capture shows both rectangle outlines, center path,
+and accepted contact when present. This is a read-only gameplay query, not
+deterministic lockstep state and not a 3D box sweep. Tests cover hit ordering,
+filtering, non-square dimensions, initial contact, invalid input and Null.

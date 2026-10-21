@@ -233,12 +233,23 @@ struct SphereSweep {
     std::vector<BodyHandle> ignoredBodies;
     bool includeSensors = false;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep };
+/// Axis-aligned XY box sweep for PhysicsWorld2D. Z is ignored by Box2D.
+/// Positive half-extents <=1000; XY displacement length <=10000.
+/// The output distance is the box CENTER travel before first contact.
+struct BoxSweep2D {
+    ayt::math::FVector3 origin{}, displacement{};
+    ayt::math::FVector3 halfExtents{0.5f, 0.5f, 0.0f};
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
     uint32_t      requestId = 0;
     SphereSweep sphereSweep{};
+    BoxSweep2D boxSweep2D{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;

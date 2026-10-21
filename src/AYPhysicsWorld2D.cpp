@@ -346,6 +346,54 @@ PhysResult PhysicsWorld2D::sphereSweepSync(const SphereSweep& sweep,
     return response.status;
 }
 
+PhysResult PhysicsWorld2D::boxSweepSync(const BoxSweep2D& sweep,
+                                        RaycastHit& outHit) {
+    outHit = {};
+    const auto finite = [](const auto& value) {
+        return std::isfinite(value.x) && std::isfinite(value.y)
+            && std::isfinite(value.z);
+    };
+    const float travelSq = sweep.displacement.x * sweep.displacement.x
+        + sweep.displacement.y * sweep.displacement.y;
+    if (!finite(sweep.origin) || !finite(sweep.displacement)
+        || !finite(sweep.halfExtents)
+        || !std::isfinite(travelSq) || travelSq < 1.0e-12f
+        || travelSq > 10000.0f * 10000.0f
+        || sweep.halfExtents.x <= 0.0f || sweep.halfExtents.y <= 0.0f
+        || sweep.halfExtents.x > 1000.0f
+        || sweep.halfExtents.y > 1000.0f
+        || sweep.ignoredBodies.size() > 64u) {
+        return PhysResult::InvalidParam;
+    }
+    PhysicsManager* manager = _manager;
+    if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+        return PhysResult::InvalidState;
+    }
+    SyncQueryRequest request{};
+    request.type = SyncQueryType::BoxSweep2D;
+    request.requestId = nextQueryId();
+    request.boxSweep2D = sweep;
+    PhysicsDebugQuery debug;
+    debug.type = SyncQueryType::BoxSweep2D;
+    debug.dimension = PhysicsDimension::TwoD;
+    debug.queryId = request.requestId;
+    debug.layerMask = sweep.layerMask;
+    debug.center = sweep.origin;
+    debug.displacement = sweep.displacement;
+    debug.halfExtents = sweep.halfExtents;
+    SyncQueryResponse response{};
+    if (!manager->syncMailbox2D()->submitAndWait(
+            request, response, 1000 * 1000)) {
+        (void)manager->debugDraw().record(
+            debug, PhysResult::BackendError, false);
+        return PhysResult::BackendError;
+    }
+    if (response.status == PhysResult::Ok) outHit = response.firstHit;
+    (void)manager->debugDraw().record(
+        debug, response.status, outHit.hit, &outHit);
+    return response.status;
+}
+
 PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                              std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
