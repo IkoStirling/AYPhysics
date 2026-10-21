@@ -1107,6 +1107,83 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
                           acceptSweep, &context);
         return;
     }
+    case SyncQueryType::BoxSweepAll2D: {
+        const BoxSweep2D& sweep = request.boxSweep2D;
+        const float x = sweep.origin.x;
+        const float y = sweep.origin.y;
+        const float hx = sweep.halfExtents.x;
+        const float hy = sweep.halfExtents.y;
+        const b2Vec2 corners[4] = {
+            {x - hx, y - hy}, {x + hx, y - hy},
+            {x + hx, y + hy}, {x - hx, y + hy}};
+        const b2ShapeProxy proxy = b2MakeProxy(corners, 4, 0.0f);
+        const b2Vec2 translation{sweep.displacement.x,
+                                 sweep.displacement.y};
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(sweep.layerMask);
+        filter.categoryBits = ~0ull;
+        struct SweepContext {
+            Impl* impl;
+            const BoxSweep2D* sweep;
+            SyncQueryResponse* response;
+            float travel;
+            uint32_t maxHits;
+        } context{_impl.get(), &sweep, &outResponse,
+            std::sqrt(sweep.displacement.x * sweep.displacement.x
+                      + sweep.displacement.y * sweep.displacement.y),
+            request.maxHits};
+        auto accept = [](b2ShapeId shape, b2Vec2 point, b2Vec2 normal,
+                         float fraction, void* data) -> float {
+            auto& cast = *static_cast<SweepContext*>(data);
+            if (!b2Shape_IsValid(shape)
+                || (!cast.sweep->includeSensors && b2Shape_IsSensor(shape))) {
+                return -1.0f;
+            }
+            const BodyHandle body = resolveBodyHandle(b2Shape_GetBody(shape),
+                cast.impl->bodyIdByIndex, cast.impl->bodyGeneration,
+                cast.impl->maxBodies);
+            const ColliderHandle collider = resolveColliderHandle(shape,
+                cast.impl->shapeIdByIndex, cast.impl->colliderGeneration,
+                cast.impl->maxBodies);
+            if (!body || !collider
+                || std::find(cast.sweep->ignoredBodies.begin(),
+                    cast.sweep->ignoredBodies.end(), body)
+                    != cast.sweep->ignoredBodies.end()) return -1.0f;
+            auto& hits = cast.response->rayHits;
+            if (hits.size() >= cast.maxHits) {
+                cast.response->status = PhysResult::OutOfRange;
+                return 0.0f;
+            }
+            RaycastHit hit;
+            hit.hit = true;
+            hit.body = body;
+            hit.collider = collider;
+            hit.point = {point.x, point.y, 0.0f};
+            hit.normal = {normal.x, normal.y, 0.0f};
+            hit.distance = fraction * cast.travel;
+            try {
+                hits.push_back(hit);
+            } catch (...) {
+                cast.response->status = PhysResult::NoMemory;
+                return 0.0f;
+            }
+            return 1.0f;
+        };
+        b2World_CastShape(_impl->worldId, &proxy, translation, filter,
+                          accept, &context);
+        if (outResponse.status != PhysResult::Ok) {
+            outResponse.rayHits.clear();
+        } else {
+            std::sort(outResponse.rayHits.begin(),
+                outResponse.rayHits.end(),
+                [](const RaycastHit& a, const RaycastHit& b) {
+                    if (a.distance != b.distance) return a.distance < b.distance;
+                    if (a.body != b.body) return a.body < b.body;
+                    return a.collider < b.collider;
+                });
+        }
+        return;
+    }
     case SyncQueryType::OrientedBoxSweep2D: {
         const OrientedBoxSweep2D& sweep = request.orientedBoxSweep2D;
         const float sine = std::sin(sweep.angleRadians);

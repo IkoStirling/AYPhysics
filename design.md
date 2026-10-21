@@ -1458,3 +1458,18 @@ overlap has zero distance and normal. Misses and failures clear output; Null
 2D returns `Unsupported`. Debug history draws the starting and ending rotated
 outlines and the travel line. This read-only query never rotates or moves an
 existing physics body and does not perform collision response.
+
+## Complete 2D axis-aligned box sweep collection (2026-10-22)
+
+`PhysicsWorld2D::boxSweepAllSync` accepts the same finite XY `BoxSweep2D`
+geometry and filters as `boxSweepSync`, plus a 1..1024 result limit (default
+64). The Box2D shape cast retains its full fraction instead of clipping to
+the first hit, so every accepted collider along the path yields an exact
+body/collider handle, point, normal and box-center travel distance. Multiple
+colliders on one body remain distinct. Results are sorted by distance, body,
+then collider because backend visitation order is unspecified. Exceeding the
+result limit returns `OutOfRange` and clears the partial array. Invalid
+input, unavailable manager, allocation failure and backend failure also
+clear output; a completed empty `Ok` result is a miss, and Null 2D returns
+`Unsupported`. Debug history draws the start/end boxes and path with the
+first accepted contact. The query does not change body state.

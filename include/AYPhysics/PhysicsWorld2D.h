@@ -97,6 +97,17 @@ public:
      */
     PhysResult boxSweepSync(const BoxSweep2D& sweep, RaycastHit& outHit);
     /**
+     * @brief Return all exact colliders touched by an axis-aligned XY box.
+     * Uses BoxSweep2D geometry/filters; maxHits is 1..1024. Results are
+     * sorted by center travel distance, body and collider. A completed miss
+     * returns Ok with an empty vector. Any error, including OutOfRange when
+     * the result limit is exceeded, clears output. Null 2D is Unsupported.
+     * Call on the game thread; this waits for the physics worker.
+     */
+    PhysResult boxSweepAllSync(const BoxSweep2D& sweep,
+                               std::vector<RaycastHit>& out,
+                               uint32_t maxHits = 64u);
+    /**
      * @brief Cast a fixed-angle rotated XY rectangle to its closest hit.
      * Finite center, displacement, angle and positive XY half-extents are
      * required. Each extent is at most 1000; XY travel is [0.000001,10000].

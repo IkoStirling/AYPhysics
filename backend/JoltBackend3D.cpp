@@ -1539,6 +1539,7 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
 
     switch (request.type) {
     case SyncQueryType::BoxSweep2D:
+    case SyncQueryType::BoxSweepAll2D:
     case SyncQueryType::OrientedBoxSweep2D:
     case SyncQueryType::CapsuleSweep2D:
     case SyncQueryType::CapsuleOverlap2D:

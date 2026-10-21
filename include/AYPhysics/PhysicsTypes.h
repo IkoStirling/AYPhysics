@@ -291,13 +291,14 @@ struct RaycastAll2D {
     bool includeSensors = false;
     uint32_t maxHits = 64u;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D };
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
     uint32_t      requestId = 0;
     SphereSweep sphereSweep{};
     BoxSweep2D boxSweep2D{};
+    uint32_t maxHits = 64u;
     CapsuleSweep2D capsuleSweep2D{};
     CapsuleOverlap2D capsuleOverlap2D{};
     OrientedBoxOverlap2D orientedBoxOverlap2D{};
@@ -316,7 +317,7 @@ struct SyncQueryResponse {
     uint32_t requestId = 0;
     PhysResult status = PhysResult::Ok;
     RaycastHit firstHit;       // for raycast
-    std::vector<RaycastHit> rayHits; // for finite multi-hit raycast
+    std::vector<RaycastHit> rayHits; // for finite multi-hit queries
     std::vector<BodyHandle> overlaps;  // for overlap
 };
 

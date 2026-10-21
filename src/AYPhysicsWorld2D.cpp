@@ -448,6 +448,65 @@ PhysResult PhysicsWorld2D::boxSweepSync(const BoxSweep2D& sweep,
     return response.status;
 }
 
+PhysResult PhysicsWorld2D::boxSweepAllSync(
+    const BoxSweep2D& sweep, std::vector<RaycastHit>& out,
+    uint32_t maxHits) {
+    out.clear();
+    try {
+        const auto finite = [](const auto& value) {
+            return std::isfinite(value.x) && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        };
+        const float travelSq = sweep.displacement.x * sweep.displacement.x
+            + sweep.displacement.y * sweep.displacement.y;
+        if (!finite(sweep.origin) || !finite(sweep.displacement)
+            || !finite(sweep.halfExtents)
+            || !std::isfinite(travelSq) || travelSq < 1.0e-12f
+            || travelSq > 10000.0f * 10000.0f
+            || sweep.halfExtents.x <= 0.0f || sweep.halfExtents.y <= 0.0f
+            || sweep.halfExtents.x > 1000.0f
+            || sweep.halfExtents.y > 1000.0f
+            || sweep.ignoredBodies.size() > 64u
+            || maxHits == 0u || maxHits > 1024u) {
+            return PhysResult::InvalidParam;
+        }
+        PhysicsManager* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+            return PhysResult::InvalidState;
+        }
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::BoxSweepAll2D;
+        request.requestId = nextQueryId();
+        request.boxSweep2D = sweep;
+        request.maxHits = maxHits;
+        PhysicsDebugQuery debug;
+        debug.type = SyncQueryType::BoxSweepAll2D;
+        debug.dimension = PhysicsDimension::TwoD;
+        debug.queryId = request.requestId;
+        debug.layerMask = sweep.layerMask;
+        debug.center = sweep.origin;
+        debug.displacement = sweep.displacement;
+        debug.halfExtents = sweep.halfExtents;
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox2D()->submitAndWait(
+                request, response, 1000 * 1000)) {
+            (void)manager->debugDraw().record(
+                debug, PhysResult::BackendError, false);
+            return PhysResult::BackendError;
+        }
+        if (response.status == PhysResult::Ok) {
+            out = std::move(response.rayHits);
+        }
+        (void)manager->debugDraw().record(
+            debug, response.status, !out.empty(),
+            out.empty() ? nullptr : &out.front());
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
+}
+
 PhysResult PhysicsWorld2D::orientedBoxSweepSync(
     const OrientedBoxSweep2D& sweep, RaycastHit& outHit) {
     outHit = {};
