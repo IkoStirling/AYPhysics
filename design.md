@@ -8,8 +8,20 @@ Jolt now owns per-body collider lists and rebuilds tagged compounds on add/remov
 compound child user data carries the complete handle, including generation.
 Resolution checks the collider generation and its full owner-body identity.
 Ray point/normal/distance and layer masks are consistent in sync/async paths.
-Overlap APIs remain body-only. Empty bodies use `EmptyShape`; collider shapes
-are retained by live colliders/native bodies, not a destruction-time cache.
+Legacy overlaps return unique bodies; the newer 2D capsule and oriented-box
+collider overlaps return exact body/collider pairs. Empty 3D bodies use
+`EmptyShape`; collider shapes are retained by live colliders/native bodies,
+not a destruction-time cache.
+
+**2D legacy sync query contract (2026-10-22):** `raycastSync`,
+`overlapSphereSync` and `overlapBoxSync` clear caller output before validating
+or waiting. All input vector components must be finite; overlap radius and XY
+half-extents must be positive. A stopped manager returns `InvalidState` without
+waiting. Only an `Ok` response populates output, and the overlap response is
+moved from the mailbox instead of copied. A valid Null-backend legacy query
+retains its historical `Ok`/empty behavior; the newer finite-segment and
+shape queries report `Unsupported` there. The legacy ray keeps its historical
+1000-unit direction and zero-XY fallback until a separate API migration.
 
 **2026-10-03 controller extension:** `PhysicsWorld3D` queues create/destroy/input/
 teleport commands; the descriptor remains out of band in `PhysicsCreatePool`

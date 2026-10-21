@@ -3,6 +3,11 @@
 AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, Box2D for 2D).
 
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
+The original 2D `raycastSync`, `overlapSphereSync` and `overlapBoxSync` clear
+caller output on errors or misses. They reject non-finite geometry and
+non-positive overlap size before submitting to the physics worker, and return
+`InvalidState` promptly after shutdown. Valid legacy overlap queries keep
+their historical `Ok`/empty result with Null 2D.
 `PhysicsWorld2D::raycastAllSync` casts a finite XY segment and returns every
 eligible exact collider hit in distance order. It supports layer masks,
 ignored bodies and optional sensors; its explicit hit limit rejects overflow

@@ -39,6 +39,7 @@ add_executable(${TEST_TARGET}
     Test_OrientedBoxOverlap2D.cpp
     Test_OrientedBoxSweep2D.cpp
     Test_RaycastAll2D.cpp
+    Test_LegacySyncQueries2D.cpp
     Test_Box2DBackend2D.cpp
     # MockBackend3D.cpp provides the testaccess:: namespace symbols; the static
     # lib drops them when no consumer in the lib references them, so we add the

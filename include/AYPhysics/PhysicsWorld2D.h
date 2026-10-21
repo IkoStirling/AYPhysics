@@ -45,12 +45,14 @@ public:
     /**
      * @brief Blocks for the closest 2D physics hit along a ray.
      * @note Configured manager debugDraw records the actual completed query.
-     * @param ray Query origin and direction; Box2D evaluates the XY plane.
+     * @param ray Finite origin and direction; Box2D evaluates the XY plane.
+     * A zero XY direction retains the legacy upward fallback.
      * @param outHit Receives the completed response. On PhysResult::Ok, inspect
      * RaycastHit::hit to distinguish a miss from a collision.
      * @param layerMask Physics collision layers eligible for the query.
-     * @return Ok when the query completed, InvalidState when the 2D mailbox is
-     * unavailable, BackendError on timeout, or a backend-reported PhysResult.
+     * @return Ok when the query completed, InvalidParam for non-finite input,
+     * InvalidState when the manager is stopped, BackendError on timeout, or a
+     * backend-reported PhysResult.
      * @framephase
      * Use for queries that require an immediate answer. Prefer async queries
      * when the result can be consumed in a later physics frame.
@@ -58,7 +60,7 @@ public:
      * Call from the game/simulation thread, never from the physics worker; this
      * method waits for that worker to service the query mailbox.
      * @failure
-     * outHit is not modified when submission cannot complete.
+     * outHit clears on failure and miss.
      */
     PhysResult raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                            PhysLayerMask layerMask = 0xFFFFFFFFu);
@@ -202,10 +204,16 @@ public:
     PhysResult overlapOrientedBoxCollidersSync(
         const OrientedBoxOverlap2D& query,
         std::vector<ColliderOverlapHit2D>& out, uint32_t maxHits = 64u);
+    /** Legacy body-only XY circle overlap. Finite center and positive finite
+     * radius are required. Clears output on failure; a stopped manager returns
+     * InvalidState. Valid Null 2D queries return Ok with empty output. */
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);
     // R1: axis-aligned box overlap (independent half-extents; no rotation).
+    /** Legacy body-only axis-aligned XY box overlap. Center and half-extents
+     * must be finite, with positive XY half-extents. Clears output on failure;
+     * a stopped manager returns InvalidState. Valid Null 2D is Ok/empty. */
     PhysResult overlapBoxSync(const ayt::math::FVector3& center,
                               const ayt::math::FVector3& halfExtents,
                               std::vector<BodyHandle>& out,
