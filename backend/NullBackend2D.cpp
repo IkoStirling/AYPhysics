@@ -36,7 +36,8 @@ void NullBackend2D::execute(const PhysicsCommand& /*cmd*/,
 void NullBackend2D::executeSync(const SyncQueryRequest& request,
                                 SyncQueryResponse& outResponse) {
     outResponse.requestId = request.requestId;
-    outResponse.status    = PhysResult::Ok;
+    outResponse.status    = request.type == SyncQueryType::SphereSweep
+        ? PhysResult::Unsupported : PhysResult::Ok;
 }
 
 PhysicsBackendInfo NullBackend2D::describe() const {

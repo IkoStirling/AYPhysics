@@ -62,6 +62,16 @@ public:
      */
     PhysResult raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                            PhysLayerMask layerMask = 0xFFFFFFFFu);
+    /**
+     * Sweep a circle through the XY world and return its closest accepted hit.
+     * Uses SphereSweep::origin/displacement XY; Z is ignored by Box2D. Radius
+     * must be in (0, 1000], XY travel in [0.000001, 10000], and ignoredBodies may
+     * contain at most 64 handles. Initial overlap has zero center travel and
+     * a zero normal. Sensors are excluded unless includeSensors is true.
+     * The output is cleared on every failure or miss. Like raycastSync, this
+     * waits for the physics worker and must not be called from that worker.
+     */
+    PhysResult sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);

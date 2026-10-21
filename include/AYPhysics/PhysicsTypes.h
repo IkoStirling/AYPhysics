@@ -222,7 +222,8 @@ struct PhysFrameSnapshot {
 // Sync-query request (§5.4 mailbox)
 // =============================================================================
 
-/// Finite world-space sphere sweep. Displacement length <=10000; radius in (0,1000].
+/// Finite world-space sphere sweep. 3D uses XYZ; 2D uses XY and ignores Z.
+/// Displacement length <=10000; radius in (0,1000].
 /// Layer mask filters targets; ignoredBodies are generation-checked handles (at most 64).
 /// Sensors are ignored by default. Distance in RaycastHit is sphere CENTER travel.
 struct SphereSweep {

@@ -112,6 +112,24 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
                 line(lines,p-axis,p+axis,c);
             line(lines,p,p+detail->normal*0.5f,c);
         }
+    } else if(q.type==SyncQueryType::SphereSweep) {
+        if(q.dimension!=PhysicsDimension::TwoD || !finite(q.center)
+            || !finite(q.displacement) || !std::isfinite(q.radius)
+            || q.radius<=0) return PhysResult::InvalidParam;
+        const V start{q.center.x,q.center.y,0};
+        const V end{q.center.x+q.displacement.x,
+                    q.center.y+q.displacement.y,0};
+        if(!finite(end)) return PhysResult::InvalidParam;
+        circle(lines,start,{1,0,0},{0,1,0},q.radius,c);
+        circle(lines,end,{1,0,0},{0,1,0},q.radius,c);
+        line(lines,start,end,c);
+        if(result==PhysResult::Ok&&hit&&detail&&finite(detail->point)
+            &&finite(detail->normal)) {
+            const V p=detail->point;
+            for(V axis : {V{0.08f,0,0},V{0,0.08f,0}})
+                line(lines,p-axis,p+axis,c);
+            line(lines,p,p+detail->normal*0.5f,c);
+        }
     } else {
         ColliderDesc s;
         if(q.type==SyncQueryType::OverlapSphere) { s.shape=ColliderShape::Sphere; s.radius=q.radius; }
@@ -125,7 +143,7 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
     value.category=PhysicsDebugCategory::Query; value.dimension=q.dimension;
     value.queryId=q.queryId; value.layerMask=q.layerMask; value.status=result; value.hit=hit;
     value.anchor=q.type==SyncQueryType::Raycast?q.ray.origin:q.center;
-    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
+    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::SphereSweep?"Circle sweep":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
     if(detail) { value.body=detail->body; value.collider=detail->collider; value.distance=detail->distance;value.hitPoint=detail->point;value.normal=detail->normal; }
     if(overlaps) {value.hitBodies=*overlaps;if(!value.body && !overlaps->empty())value.body=overlaps->front();}
     else if(detail && detail->body) value.hitBodies.push_back(detail->body);

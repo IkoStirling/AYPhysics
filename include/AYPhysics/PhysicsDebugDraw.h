@@ -26,7 +26,7 @@ struct PhysicsDebugQuery {
     SyncQueryType type = SyncQueryType::Raycast;
     PhysicsDimension dimension = PhysicsDimension::ThreeD;
     ayt::math::Ray ray{};
-    ayt::math::FVector3 center{}, halfExtents{};
+    ayt::math::FVector3 center{}, halfExtents{}, displacement{};
     float radius = 0;
     ayt::math::FQuaternion rotation = ayt::math::FQuaternion::identity();
     uint32_t queryId = 0;

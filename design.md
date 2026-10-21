@@ -1332,3 +1332,23 @@ Camera controllers bind persistent Entity identity with a World-scoped runtime h
 Entity.PhysicsIntegration installs the default Jolt sphere-sweep adapter. Host custom queries override it; collisionEnabled explicitly disables per controller. The finite-volume query ignores sensors/self/target bodies, checks generation handles and reports initial penetration at zero center travel. Null/Mock/2D return Unsupported. Orbit distance plus collision radius/padding implement the camera arm and damped recovery. Explicit manager adapters must be detached before manager destruction.
 
 Editor has stable target selection, collision parameters, and undoable main-window hierarchy dragging. CameraRigProject is a portable visual/authoring fixture; its Wall is visual-only, while AYEntity_CameraRigIntegrationTests exercises actual Jolt wall avoidance, lens effects/blending, self-ignore and recovery. See ../../AYDocs/CAMERA-SYSTEM.md and the integration evidence in ../../AYDocs/ENTITY-SPATIAL-HIERARCHY.md. Native Computer Use acceptance is deferred by user request.
+
+## 2D circle sweep query (2026-10-22)
+
+`PhysicsWorld2D::sphereSweepSync` accepts the existing `SphereSweep` value as
+an XY circle cast. It checks finite origin/travel/radius, XY travel from
+0.000001 to 10,000 units, radius in (0, 1,000], and at most 64 ignored body handles
+before submitting to the existing 2D sync-query mailbox. Z is ignored for the
+Box2D query; a failed or missing query clears the output hit. Null 2D reports
+Unsupported rather than claiming an unobstructed world.
+
+The Box2D backend uses one-point `b2World_CastShape`, clips to the nearest
+accepted result, skips ignored generation-checked bodies and sensors unless
+requested, and returns body plus exact collider handle, XY contact point and
+normal, and circle-center travel distance. An initial overlap is a zero-travel
+hit with zero normal as Box2D reports it. This query is read-only and has no
+effect on simulation or lockstep authority. Real backend and null tests cover
+hit/miss, filters, initial overlap, rejected inputs, and shutdown behavior.
+When query debugging is enabled, the completed sweep records its start/end
+circle, center path, accepted contact, and result status in the existing
+bounded debug history.
