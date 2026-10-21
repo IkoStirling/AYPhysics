@@ -63,6 +63,16 @@ public:
     PhysResult raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                            PhysLayerMask layerMask = 0xFFFFFFFFu);
     /**
+     * Collect all exact collider hits along a finite XY segment.
+     * Origin/displacement must be finite; XY travel is [0.000001,10000].
+     * Layer, sensor and up to 64 ignored-body filters apply. maxHits is
+     * 1..1024; overflow returns OutOfRange with no partial list. Results are
+     * sorted by distance, then body and collider. Output clears on failure or
+     * miss. Null 2D returns Unsupported. Call from the game thread only.
+     */
+    PhysResult raycastAllSync(const RaycastAll2D& query,
+                              std::vector<RaycastHit>& out);
+    /**
      * Sweep a circle through the XY world and return its closest accepted hit.
      * Uses SphereSweep::origin/displacement XY; Z is ignored by Box2D. Radius
      * must be in (0, 1000], XY travel in [0.000001, 10000], and ignoredBodies may

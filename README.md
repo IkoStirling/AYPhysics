@@ -3,6 +3,10 @@
 AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, Box2D for 2D).
 
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
+`PhysicsWorld2D::raycastAllSync` casts a finite XY segment and returns every
+eligible exact collider hit in distance order. It supports layer masks,
+ignored bodies and optional sensors; its explicit hit limit rejects overflow
+without exposing a partial list. Null 2D reports `Unsupported`.
 The 2D world also offers a finite XY circle sweep through the existing
 `SphereSweep` request: `PhysicsWorld2D::sphereSweepSync` returns the closest
 body/collider, contact point and normal, and circle-center travel distance.

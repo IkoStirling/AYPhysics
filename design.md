@@ -1427,3 +1427,19 @@ overlap or future multi-hit arrays. A backend allocation exception becomes a
 partial hit array escapes. The worker marks the slot ready after publishing
 the response. This hardens allocation failure and result ownership without
 changing query order, timeout duration, or existing timeout behavior.
+
+## Complete 2D ray hit collection (2026-10-22)
+
+`PhysicsWorld2D::raycastAllSync` takes a finite XY origin and displacement,
+with travel length in [0.000001, 10000]. It returns every eligible collider
+crossed by that segment, including multiple colliders on one body. Results
+contain exact generation-checked body and collider handles, hit point/normal
+and distance from the segment origin. Box2D may visit shapes in any order, so
+the response is sorted by distance, then body and collider handles. A sensor
+is skipped unless requested; layer masks and up to 64 ignored bodies apply.
+The request limit is 1..1024 hits, default 64. Exceeding it returns
+`OutOfRange` with no partial list. Invalid input, unavailable manager, backend
+failure and allocation failure also clear the output; Null 2D reports
+`Unsupported`. Empty `Ok` means a completed miss. The query reads the current
+physics world without moving bodies or changing lockstep authority. Debug
+history draws the actual finite segment and first accepted contact.

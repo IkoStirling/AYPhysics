@@ -273,7 +273,15 @@ struct OrientedBoxOverlap2D {
     std::vector<BodyHandle> ignoredBodies;
     bool includeSensors = false;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D };
+/// Finite XY segment ray returning exact hits for every eligible collider.
+struct RaycastAll2D {
+    ayt::math::FVector3 origin{}, displacement{1.0f, 0.0f, 0.0f};
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+    uint32_t maxHits = 64u;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
@@ -283,6 +291,7 @@ struct SyncQueryRequest {
     CapsuleSweep2D capsuleSweep2D{};
     CapsuleOverlap2D capsuleOverlap2D{};
     OrientedBoxOverlap2D orientedBoxOverlap2D{};
+    RaycastAll2D raycastAll2D{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;
@@ -296,6 +305,7 @@ struct SyncQueryResponse {
     uint32_t requestId = 0;
     PhysResult status = PhysResult::Ok;
     RaycastHit firstHit;       // for raycast
+    std::vector<RaycastHit> rayHits; // for finite multi-hit raycast
     std::vector<BodyHandle> overlaps;  // for overlap
 };
 

@@ -303,6 +303,58 @@ PhysResult PhysicsWorld2D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     return resp.status;
 }
 
+PhysResult PhysicsWorld2D::raycastAllSync(
+    const RaycastAll2D& query, std::vector<RaycastHit>& out) {
+    out.clear();
+    try {
+        const auto finite = [](const auto& value) {
+            return std::isfinite(value.x) && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        };
+        const float lengthSq = query.displacement.x * query.displacement.x
+            + query.displacement.y * query.displacement.y;
+        if (!finite(query.origin) || !finite(query.displacement)
+            || !std::isfinite(lengthSq) || lengthSq < 1.0e-12f
+            || lengthSq > 10000.0f * 10000.0f
+            || query.ignoredBodies.size() > 64u
+            || query.maxHits == 0u || query.maxHits > 1024u) {
+            return PhysResult::InvalidParam;
+        }
+        PhysicsManager* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+            return PhysResult::InvalidState;
+        }
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::RaycastAll2D;
+        request.requestId = nextQueryId();
+        request.raycastAll2D = query;
+        PhysicsDebugQuery debug;
+        debug.type = SyncQueryType::RaycastAll2D;
+        debug.dimension = PhysicsDimension::TwoD;
+        debug.queryId = request.requestId;
+        debug.layerMask = query.layerMask;
+        debug.ray = ayt::math::Ray(query.origin, query.displacement);
+        debug.rayDistance = std::sqrt(lengthSq);
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox2D()->submitAndWait(
+                request, response, 1000 * 1000)) {
+            (void)manager->debugDraw().record(
+                debug, PhysResult::BackendError, false);
+            return PhysResult::BackendError;
+        }
+        if (response.status == PhysResult::Ok) {
+            out = std::move(response.rayHits);
+        }
+        (void)manager->debugDraw().record(
+            debug, response.status, !out.empty(),
+            out.empty() ? nullptr : &out.front());
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
+}
+
 PhysResult PhysicsWorld2D::sphereSweepSync(const SphereSweep& sweep,
                                            RaycastHit& outHit) {
     outHit = {};

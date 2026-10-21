@@ -1129,6 +1129,75 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
                           acceptSweep, &context);
         return;
     }
+    case SyncQueryType::RaycastAll2D: {
+        const RaycastAll2D& query = request.raycastAll2D;
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(query.layerMask);
+        filter.categoryBits = ~0ull;
+        const b2Vec2 origin{query.origin.x, query.origin.y};
+        const b2Vec2 displacement{
+            query.displacement.x, query.displacement.y};
+        struct RayContext {
+            Impl* impl;
+            const RaycastAll2D* query;
+            SyncQueryResponse* response;
+            float length;
+        } context{_impl.get(), &query, &outResponse,
+            std::sqrt(query.displacement.x * query.displacement.x
+                      + query.displacement.y * query.displacement.y)};
+        auto accept = [](b2ShapeId shape, b2Vec2 point, b2Vec2 normal,
+                         float fraction, void* data) -> float {
+            auto& ray = *static_cast<RayContext*>(data);
+            if (!b2Shape_IsValid(shape)
+                || (!ray.query->includeSensors && b2Shape_IsSensor(shape))) {
+                return -1.0f;
+            }
+            const b2BodyId bodyId = b2Shape_GetBody(shape);
+            const BodyHandle body = resolveBodyHandle(bodyId,
+                ray.impl->bodyIdByIndex, ray.impl->bodyGeneration,
+                ray.impl->maxBodies);
+            const ColliderHandle collider = resolveColliderHandle(shape,
+                ray.impl->shapeIdByIndex, ray.impl->colliderGeneration,
+                ray.impl->maxBodies);
+            if (!body || !collider
+                || std::find(ray.query->ignoredBodies.begin(),
+                    ray.query->ignoredBodies.end(), body)
+                    != ray.query->ignoredBodies.end()) return -1.0f;
+            auto& hits = ray.response->rayHits;
+            if (hits.size() >= ray.query->maxHits) {
+                ray.response->status = PhysResult::OutOfRange;
+                return 0.0f;
+            }
+            RaycastHit hit;
+            hit.hit = true;
+            hit.body = body;
+            hit.collider = collider;
+            hit.point = {point.x, point.y, 0.0f};
+            hit.normal = {normal.x, normal.y, 0.0f};
+            hit.distance = fraction * ray.length;
+            try {
+                hits.push_back(hit);
+            } catch (...) {
+                ray.response->status = PhysResult::NoMemory;
+                return 0.0f;
+            }
+            return 1.0f;
+        };
+        b2World_CastRay(_impl->worldId, origin, displacement, filter,
+                        accept, &context);
+        if (outResponse.status != PhysResult::Ok) {
+            outResponse.rayHits.clear();
+        } else {
+            std::sort(outResponse.rayHits.begin(),
+                outResponse.rayHits.end(),
+                [](const RaycastHit& a, const RaycastHit& b) {
+                    if (a.distance != b.distance) return a.distance < b.distance;
+                    if (a.body != b.body) return a.body < b.body;
+                    return a.collider < b.collider;
+                });
+        }
+        return;
+    }
     case SyncQueryType::Raycast: {
         b2QueryFilter filter = b2DefaultQueryFilter();
         filter.maskBits      = static_cast<uint64_t>(request.layerMask);

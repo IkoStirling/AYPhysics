@@ -96,15 +96,16 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
     const uint64_t now=_clock(); expire(now);
     const uint32_t c=result!=PhysResult::Ok?_options.errorColor:(hit?_options.hitColor:_options.missColor);
     std::vector<PhysicsDebugLine> lines;
-    if(q.type==SyncQueryType::Raycast) {
+    if(q.type==SyncQueryType::Raycast || q.type==SyncQueryType::RaycastAll2D) {
         V direction=q.ray.dir;
         V origin=q.ray.origin;
         if(q.dimension==PhysicsDimension::TwoD) { direction.z=0; origin.z=0; }
         const double length=std::sqrt(double(direction.x)*direction.x+double(direction.y)*direction.y+double(direction.z)*direction.z);
         if(!finite(q.ray.origin)||!finite(direction)||!(length>0)) return PhysResult::InvalidParam;
-        V end=origin+V{float(double(direction.x)/length*10000.0),
-                      float(double(direction.y)/length*10000.0),
-                      float(double(direction.z)/length*10000.0)};
+        if(!std::isfinite(q.rayDistance) || q.rayDistance<=0) return PhysResult::InvalidParam;
+        V end=origin+V{float(double(direction.x)/length*q.rayDistance),
+                      float(double(direction.y)/length*q.rayDistance),
+                      float(double(direction.z)/length*q.rayDistance)};
         line(lines,origin,end,c);
         if(result==PhysResult::Ok&&hit&&detail&&finite(detail->point)&&finite(detail->normal)) {
             const V p=detail->point;
@@ -165,8 +166,8 @@ PhysResult PhysicsDebugDraw::record(const PhysicsDebugQuery& q, PhysResult resul
     PhysicsDebugRecord value;
     value.category=PhysicsDebugCategory::Query; value.dimension=q.dimension;
     value.queryId=q.queryId; value.layerMask=q.layerMask; value.status=result; value.hit=hit;
-    value.anchor=q.type==SyncQueryType::Raycast?q.ray.origin:q.center;
-    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::SphereSweep?"Circle sweep":q.type==SyncQueryType::BoxSweep2D?"Box sweep":q.type==SyncQueryType::CapsuleSweep2D?"Capsule sweep":q.type==SyncQueryType::CapsuleOverlap2D?"Overlap capsule":q.type==SyncQueryType::OrientedBoxOverlap2D?"Overlap rotated box":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
+    value.anchor=q.type==SyncQueryType::Raycast||q.type==SyncQueryType::RaycastAll2D?q.ray.origin:q.center;
+    value.label=q.type==SyncQueryType::Raycast?"Raycast":q.type==SyncQueryType::RaycastAll2D?"Raycast all":q.type==SyncQueryType::SphereSweep?"Circle sweep":q.type==SyncQueryType::BoxSweep2D?"Box sweep":q.type==SyncQueryType::CapsuleSweep2D?"Capsule sweep":q.type==SyncQueryType::CapsuleOverlap2D?"Overlap capsule":q.type==SyncQueryType::OrientedBoxOverlap2D?"Overlap rotated box":q.type==SyncQueryType::OverlapSphere?"Overlap sphere":"Overlap box";
     if(detail) { value.body=detail->body; value.collider=detail->collider; value.distance=detail->distance;value.hitPoint=detail->point;value.normal=detail->normal; }
     if(overlaps) {value.hitBodies=*overlaps;if(!value.body && !overlaps->empty())value.body=overlaps->front();}
     else if(detail && detail->body) value.hitBodies.push_back(detail->body);
