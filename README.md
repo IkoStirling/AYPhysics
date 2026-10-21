@@ -13,6 +13,12 @@ and [architecture audit](../../AYDocs/AYPHYSICS-ARCHITECTURE-REVIEW-20261022.md)
 for the current query surface and remaining work.
 
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
+The legacy 3D ray and sphere-overlap queries now reject invalid/non-finite
+geometry before mailbox submission. Sync failures clear their hit/body output;
+the Host query facade also clears output when it is unbound or stopped, and
+`isReady()` reports false after shutdown. The three legacy 3D async ray,
+sphere-overlap and oriented-box-overlap entries return query ID zero on invalid
+geometry or a stopped manager; accepted results still arrive in a later frame.
 The original 2D `raycastSync`, `overlapSphereSync` and `overlapBoxSync` clear
 caller output on errors or misses. They reject non-finite geometry and
 non-positive overlap size before submitting to the physics worker, and return

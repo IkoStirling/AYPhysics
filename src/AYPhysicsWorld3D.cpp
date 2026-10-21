@@ -3,9 +3,38 @@
 
 #include "AYPhysics/PhysicsManager.h"
 
-#include <cmath>
+#include <utility>
 
 namespace ayt::physics {
+
+namespace {
+bool finiteVector(const ayt::math::FVector3& value) noexcept {
+    return std::isfinite(value.x) && std::isfinite(value.y)
+        && std::isfinite(value.z);
+}
+
+bool validRay(const ayt::math::Ray& ray) noexcept {
+    const float lengthSq = ray.dir.x * ray.dir.x
+        + ray.dir.y * ray.dir.y + ray.dir.z * ray.dir.z;
+    return finiteVector(ray.origin) && finiteVector(ray.dir)
+        && std::isfinite(lengthSq) && lengthSq > 1.0e-16f;
+}
+
+bool validSphere(const ayt::math::FVector3& center,
+                 float radius) noexcept {
+    return finiteVector(center) && std::isfinite(radius) && radius > 0.0f;
+}
+
+bool validBox(const ayt::math::FVector3& center,
+              const ayt::math::FVector3& halfExtents,
+              const ayt::math::FQuaternion& rotation) noexcept {
+    const float rotationLengthSq = rotation.dot(rotation);
+    return finiteVector(center) && finiteVector(halfExtents)
+        && halfExtents.x > 0.0f && halfExtents.y > 0.0f
+        && halfExtents.z > 0.0f && std::isfinite(rotationLengthSq)
+        && rotationLengthSq >= 1.0e-12f;
+}
+}
 
 // =========================================================================
 // Handle minting (game thread only)
@@ -356,7 +385,8 @@ PhysResult PhysicsWorld3D::destroyJoint(JointHandle h) {
 
 uint32_t PhysicsWorld3D::raycastAsync(const ayt::math::Ray& ray, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!validRay(ray) || !m || !m->isRunning()
+        || !m->commandQueue()) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::RaycastAsync;
     cmd.queryId = nextQueryId();
@@ -374,7 +404,8 @@ uint32_t PhysicsWorld3D::raycastAsync(const ayt::math::Ray& ray, PhysLayerMask l
 uint32_t PhysicsWorld3D::overlapSphereAsync(const ayt::math::FVector3& center, float radius,
                                             PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!validSphere(center, radius) || !m || !m->isRunning()
+        || !m->commandQueue()) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::OverlapSphereAsync;
     cmd.queryId = nextQueryId();
@@ -393,7 +424,8 @@ uint32_t PhysicsWorld3D::overlapBoxAsync(const ayt::math::FVector3& center,
                                          const ayt::math::FVector3& halfExtents,
                                          const ayt::math::FQuaternion& rot, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!validBox(center, halfExtents, rot) || !m || !m->isRunning()
+        || !m->commandQueue() || !m->createPool()) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::OverlapBoxAsync;
     cmd.queryId = nextQueryId();
@@ -413,8 +445,9 @@ uint32_t PhysicsWorld3D::overlapBoxAsync(const ayt::math::FVector3& center,
 PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
                                        PhysLayerMask layerMask) {
     outHit = {};
+    if (!validRay(ray)) return PhysResult::InvalidParam;
     PhysicsManager* m = _manager;
-    if (!m || !m->syncMailbox()) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->syncMailbox()) return PhysResult::InvalidState;
     PhysicsDebugQuery debug; debug.type = SyncQueryType::Raycast;
     debug.dimension = PhysicsDimension::ThreeD;
     debug.ray = ray;
@@ -429,7 +462,7 @@ PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
         (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
-    outHit = resp.firstHit;
+    if (resp.status == PhysResult::Ok) outHit = resp.firstHit;
     (void)m->debugDraw().record(debug, resp.status, outHit.hit, &outHit);
     return resp.status;
 }
@@ -452,8 +485,10 @@ PhysResult PhysicsWorld3D::sphereSweepSync(const SphereSweep& sweep, RaycastHit&
 }
 PhysResult PhysicsWorld3D::overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                              std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
+    out.clear();
+    if (!validSphere(center, radius)) return PhysResult::InvalidParam;
     PhysicsManager* m = _manager;
-    if (!m || !m->syncMailbox()) return PhysResult::InvalidState;
+    if (!m || !m->isRunning() || !m->syncMailbox()) return PhysResult::InvalidState;
     PhysicsDebugQuery debug; debug.type = SyncQueryType::OverlapSphere;
     debug.dimension = PhysicsDimension::ThreeD;
     debug.center = center; debug.radius = radius;
@@ -469,7 +504,7 @@ PhysResult PhysicsWorld3D::overlapSphereSync(const ayt::math::FVector3& center, 
         (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
         return PhysResult::BackendError;
     }
-    out = resp.overlaps;
+    if (resp.status == PhysResult::Ok) out = std::move(resp.overlaps);
     (void)m->debugDraw().record(debug, resp.status, !out.empty(),nullptr,&out);
     return resp.status;
 }

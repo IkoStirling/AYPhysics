@@ -8,13 +8,15 @@ namespace ayt::physics
 
 bool PhysicsQueryAdapter::isReady() const
 {
-    return _manager != nullptr && _manager->world3D() != nullptr;
+    return _manager != nullptr && _manager->isRunning()
+        && _manager->world3D() != nullptr;
 }
 
 PhysResult PhysicsQueryAdapter::raycastSync(const ayt::math::Ray& ray,
                                             RaycastHit& outHit,
                                             PhysLayerMask layerMask)
 {
+    outHit = {};
     if (!isReady()) {
         return PhysResult::InvalidState;
     }
@@ -31,6 +33,7 @@ PhysResult PhysicsQueryAdapter::overlapSphereSync(const ayt::math::FVector3& cen
                                                   std::vector<BodyHandle>& out,
                                                   PhysLayerMask layerMask)
 {
+    out.clear();
     if (!isReady()) {
         return PhysResult::InvalidState;
     }

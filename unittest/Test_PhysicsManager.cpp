@@ -3,11 +3,14 @@
 #include "AYPhysics/PhysicsWorld2D.h"
 #include "AYPhysics/PhysicsTypes.h"
 #include "AYPhysics/PhysicsCommandQueue.h"
+#include "AYPhysics/PhysicsQueryAdapter.h"
 
 #include "AYTest.h"
 
 #include "AYTime/Clock.h"
 #include "AYPlatform/Thread.h"
+
+#include <limits>
 
 using namespace ayt::physics;
 
@@ -164,6 +167,86 @@ TEST_SUITE(PhysicsManagerTests)
         CHECK_TRUE(world2D->createRigidbody(bodyDesc, body2D)
             == PhysResult::InvalidState);
         CHECK_INT_EQ(body2D, InvalidBodyHandle);
+    }
+
+    TEST_CASE(ThreeDimensionalLegacyQueriesValidateAndClearOutputs) {
+        PhysicsBackendDescriptor desc;
+        desc.kind3D = BackendKind::Null;
+        auto mgr = PhysicsManager::create(desc);
+        CHECK_NOT_NULL(mgr.get());
+        PhysicsWorld3D* world = mgr->world3D();
+        PhysicsQueryAdapter facade;
+        CHECK_FALSE(facade.isReady());
+        ayt::math::Ray ray;
+        ray.origin = {0.0f, 0.0f, 0.0f};
+        ray.dir = {1.0f, 0.0f, 0.0f};
+        const float nan = (std::numeric_limits<float>::quiet_NaN)();
+        RaycastHit hit{};
+        hit.hit = true;
+        hit.body = makeHandle(5u, 1u);
+        ray.origin.x = nan;
+        CHECK_TRUE(world->raycastSync(ray, hit) == PhysResult::InvalidParam);
+        CHECK_FALSE(hit.hit);
+        hit.hit = true;
+        CHECK_TRUE(facade.raycastSync(ray, hit, 0xFFFFFFFFu)
+            == PhysResult::InvalidState);
+        CHECK_FALSE(hit.hit);
+        CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+        ray.origin.x = 0.0f;
+        ray.dir = {0.0f, 0.0f, 0.0f};
+        CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+        ray.dir = {1.0f, 0.0f, 0.0f};
+
+        std::vector<BodyHandle> bodies{makeHandle(7u, 1u)};
+        CHECK_TRUE(facade.overlapSphereSync({0.0f, 0.0f, 0.0f},
+            1.0f, bodies, 0xFFFFFFFFu) == PhysResult::InvalidState);
+        CHECK_TRUE(bodies.empty());
+        bodies.push_back(makeHandle(7u, 1u));
+        CHECK_TRUE(world->overlapSphereSync({nan, 0.0f, 0.0f},
+            1.0f, bodies, 0xFFFFFFFFu) == PhysResult::InvalidParam);
+        CHECK_TRUE(bodies.empty());
+        CHECK_INT_EQ(world->overlapSphereAsync({0.0f, 0.0f, 0.0f},
+            0.0f, 0xFFFFFFFFu), 0u);
+        auto rotation = ayt::math::FQuaternion::identity();
+        CHECK_INT_EQ(world->overlapBoxAsync({0.0f, 0.0f, 0.0f},
+            {0.0f, 1.0f, 1.0f}, rotation, 0xFFFFFFFFu), 0u);
+        rotation = ayt::math::FQuaternion(0.0f, 0.0f, 0.0f, 0.0f);
+        CHECK_INT_EQ(world->overlapBoxAsync({0.0f, 0.0f, 0.0f},
+            {1.0f, 1.0f, 1.0f}, rotation, 0xFFFFFFFFu), 0u);
+
+        facade.bind(mgr.get());
+        CHECK_TRUE(facade.isReady());
+
+        hit.hit = true;
+        CHECK_TRUE(world->raycastSync(ray, hit) == PhysResult::Ok);
+        CHECK_FALSE(hit.hit);
+        bodies.push_back(makeHandle(7u, 1u));
+        CHECK_TRUE(world->overlapSphereSync({0.0f, 0.0f, 0.0f},
+            1.0f, bodies, 0xFFFFFFFFu) == PhysResult::Ok);
+        CHECK_TRUE(bodies.empty());
+        mgr->shutdown();
+        CHECK_FALSE(facade.isReady());
+        hit.hit = true;
+        CHECK_TRUE(world->raycastSync(ray, hit) == PhysResult::InvalidState);
+        CHECK_FALSE(hit.hit);
+        bodies.push_back(makeHandle(7u, 1u));
+        CHECK_TRUE(world->overlapSphereSync({0.0f, 0.0f, 0.0f},
+            1.0f, bodies, 0xFFFFFFFFu) == PhysResult::InvalidState);
+        CHECK_TRUE(bodies.empty());
+        hit.hit = true;
+        CHECK_TRUE(facade.raycastSync(ray, hit, 0xFFFFFFFFu)
+            == PhysResult::InvalidState);
+        CHECK_FALSE(hit.hit);
+        bodies.push_back(makeHandle(7u, 1u));
+        CHECK_TRUE(facade.overlapSphereSync({0.0f, 0.0f, 0.0f},
+            1.0f, bodies, 0xFFFFFFFFu) == PhysResult::InvalidState);
+        CHECK_TRUE(bodies.empty());
+        CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+        CHECK_INT_EQ(world->overlapSphereAsync({0.0f, 0.0f, 0.0f},
+            1.0f, 0xFFFFFFFFu), 0u);
+        CHECK_INT_EQ(world->overlapBoxAsync({0.0f, 0.0f, 0.0f},
+            {1.0f, 1.0f, 1.0f}, ayt::math::FQuaternion::identity(),
+            0xFFFFFFFFu), 0u);
     }
 
     TEST_CASE(LockstepStubDoesNotBlockNullStep) {

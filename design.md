@@ -334,8 +334,8 @@ Industrial target: approach Jolt-sample / mid-tier engine throughput — **not**
 | `PhysicsManager::shutdown` | Main | Drains queue, joins physics thread |
 | `World3D::createRigidbody(desc, out)` | Main | Allocates create-slot + handle; enqueues compact `CreateRigidbody` with `CreateSlotId`; returns `PhysResult` + `out` handle immediately (body exists after next drain) |
 | `World3D::destroyRigidbody(handle)` | Main | Enqueues `DestroyRigidbody`; generation invalidated on physics thread |
-| `World3D::raycastAsync` / `overlap*Async` | Main | Enqueues query; result appears in **next** `fetchResults()` under `queryId` |
-| `World3D::raycastSync` / `overlap*Sync` | Main | Blocks game thread on sync-query mailbox; physics thread services between commands / after step; **never** calls into Jolt from main |
+| `World3D::raycastAsync` / `overlap*Async` | Main | Validates finite geometry and running manager before enqueue; zero rejects invalid/stopped/full requests, and accepted results appear in **next** `fetchResults()` under `queryId` |
+| `World3D::raycastSync` / `overlap*Sync` | Main | Clears caller output and validates geometry before the mailbox; physics thread services between commands / after step; **never** calls into Jolt from main |
 | **All backend internals** | **Physics thread only** | `JPH::PhysicsSystem`, `JPH::BodyInterface`, etc. **never** touched from game thread |
 
 **Query dual-path (locked):**
