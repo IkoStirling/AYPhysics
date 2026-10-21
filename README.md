@@ -19,6 +19,9 @@ failure behavior as circle sweep; Null 2D reports `Unsupported`.
 `PhysicsWorld2D::boxSweepAllSync` returns every eligible exact collider along
 that rectangle's path, sorted by center travel. A 1..1024 hit limit reports
 `OutOfRange` without exposing a partial list; Null 2D is `Unsupported`.
+The corresponding `sphereSweepAllSync`, `capsuleSweepAllSync` and
+`orientedBoxSweepAllSync` queries provide the same sorted, bounded multi-hit
+results for circles, upright capsules and fixed-angle rotated rectangles.
 `PhysicsWorld2D::capsuleSweepSync` casts an upright XY capsule with total height
 including its round ends. It reports the closest collider and center travel,
 supports the same filters and failure behavior, and accepts a circular capsule

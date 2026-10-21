@@ -291,7 +291,7 @@ struct RaycastAll2D {
     bool includeSensors = false;
     uint32_t maxHits = 64u;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D };
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D, SphereSweepAll2D, CapsuleSweepAll2D, OrientedBoxSweepAll2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;

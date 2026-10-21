@@ -32,6 +32,7 @@ add_executable(${TEST_TARGET}
     Test_CircleSweep2D.cpp
     Test_BoxSweep2D.cpp
     Test_BoxSweepAll2D.cpp
+    Test_ShapeSweepAll2D.cpp
     Test_CapsuleSweep2D.cpp
     Test_CapsuleOverlap2D.cpp
     Test_OrientedBoxOverlap2D.cpp

@@ -38,6 +38,9 @@ void MockBackend3D::executeSync(const SyncQueryRequest& request,
     outResponse.status = request.type == SyncQueryType::SphereSweep
         || request.type == SyncQueryType::BoxSweep2D
         || request.type == SyncQueryType::BoxSweepAll2D
+        || request.type == SyncQueryType::SphereSweepAll2D
+        || request.type == SyncQueryType::CapsuleSweepAll2D
+        || request.type == SyncQueryType::OrientedBoxSweepAll2D
         || request.type == SyncQueryType::OrientedBoxSweep2D
         || request.type == SyncQueryType::CapsuleSweep2D
         || request.type == SyncQueryType::CapsuleOverlap2D

@@ -83,6 +83,15 @@ public:
      */
     PhysResult sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit);
     /**
+     * @brief Collect every exact collider touched by a finite XY circle cast.
+     * Uses SphereSweep geometry and filters; maxHits is 1..1024. Results sort
+     * by center travel, body and collider. A valid miss is empty Ok; errors
+     * clear output. Null 2D returns Unsupported. Waits for the worker.
+     */
+    PhysResult sphereSweepAllSync(const SphereSweep& sweep,
+                                  std::vector<RaycastHit>& out,
+                                  uint32_t maxHits = 64u);
+    /**
      * @brief Sweep an axis-aligned XY box and return its closest accepted hit.
      * @param sweep Finite center, travel and positive XY half-extents; each
      * extent is at most 1000, XY travel is [0.000001, 10000]. At most 64 body
@@ -119,6 +128,15 @@ public:
     PhysResult orientedBoxSweepSync(const OrientedBoxSweep2D& sweep,
                                     RaycastHit& outHit);
     /**
+     * @brief Collect all exact hits from a fixed-angle rotated box cast.
+     * Geometry and filters match orientedBoxSweepSync; maxHits is 1..1024.
+     * Results sort by travel/body/collider; errors clear output, including
+     * OutOfRange. Null 2D returns Unsupported. Waits for the worker.
+     */
+    PhysResult orientedBoxSweepAllSync(const OrientedBoxSweep2D& sweep,
+                                       std::vector<RaycastHit>& out,
+                                       uint32_t maxHits = 64u);
+    /**
      * @brief Sweep an upright XY capsule and return the closest accepted hit.
      * @param sweep Finite center and travel; radius (0,1000], total height
      * [2*radius,2000], XY travel [0.000001,10000]. At most 64 body handles
@@ -132,6 +150,15 @@ public:
      * worker and must never be called from that worker.
      */
     PhysResult capsuleSweepSync(const CapsuleSweep2D& sweep, RaycastHit& outHit);
+    /**
+     * @brief Collect all colliders touched by an upright XY capsule cast.
+     * Geometry and filters match capsuleSweepSync; maxHits is 1..1024.
+     * Results sort by travel/body/collider; errors clear output, including
+     * OutOfRange. Null 2D returns Unsupported. Waits for the worker.
+     */
+    PhysResult capsuleSweepAllSync(const CapsuleSweep2D& sweep,
+                                   std::vector<RaycastHit>& out,
+                                   uint32_t maxHits = 64u);
     /**
      * @brief Find bodies overlapping an upright XY capsule at one center.
      * @param query Finite center, radius (0,1000], total height

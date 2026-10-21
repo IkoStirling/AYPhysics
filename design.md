@@ -1476,3 +1476,16 @@ first accepted contact. The query does not change body state.
 The Box2D worker's multi-hit shape callback owns common filtering, result
 budget, exact handle resolution and ordering, so future swept shapes can use
 the same failure and tie behavior.
+
+## Complete 2D sweep collection for remaining shapes (2026-10-22)
+
+`sphereSweepAllSync`, `capsuleSweepAllSync` and `orientedBoxSweepAllSync`
+reuse each shape's established geometry, fixed orientation during travel,
+validation and filters. Each accepts a 1..1024 result limit, default 64,
+and yields every eligible exact collider along the finite XY cast. The
+Box2D worker's shared multi-hit callback applies sensor, layer and ignored
+body filters and sorts by center travel, body and collider. Initial overlap
+has zero travel/normal. Overflow discards the whole result and returns
+`OutOfRange`; allocation failure is `NoMemory`, Null 2D is `Unsupported`,
+and a valid empty `Ok` is a miss. Debug history draws the swept shape and
+first contact. All queries are read-only and remain on the worker mailbox.

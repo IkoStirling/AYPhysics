@@ -86,6 +86,40 @@ TEST_CASE(CollectsSortedExactCollidersAndHonorsFilters) {
     CHECK_TRUE(hits.empty());
     manager->shutdown();
 }
+
+TEST_CASE(OneBodyCanReturnMultipleExactColliders) {
+    auto manager = ayt::physics::test_helpers::makeBox2DMgr();
+    CHECK_TRUE(manager != nullptr);
+    PhysicsWorld2D* world = manager->world2D();
+    RigidbodyDesc rigid;
+    rigid.type = BodyType::Static;
+    rigid.layer = 3u;
+    BodyHandle body = 0u;
+    CHECK_TRUE(world->createRigidbody(rigid, body) == PhysResult::Ok);
+    ColliderDesc shape;
+    shape.body = body;
+    shape.shape = ColliderShape::Box;
+    shape.halfExtents = {0.5f, 0.2f, 0.0f};
+    shape.offset = {0.0f, 1.0f, 0.0f};
+    ColliderHandle upper = 0u, lower = 0u;
+    CHECK_TRUE(world->createCollider(shape, upper) == PhysResult::Ok);
+    shape.offset.y = -1.0f;
+    CHECK_TRUE(world->createCollider(shape, lower) == PhysResult::Ok);
+    CHECK_TRUE(manager->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+
+    BoxSweep2D sweep;
+    sweep.origin = {0.0f, 4.0f, 0.0f};
+    sweep.displacement = {0.0f, -8.0f, 0.0f};
+    std::vector<RaycastHit> hits;
+    CHECK_TRUE(world->boxSweepAllSync(sweep, hits) == PhysResult::Ok);
+    CHECK_INT_EQ(hits.size(), 2u);
+    CHECK_INT_EQ(hits[0].body, body);
+    CHECK_INT_EQ(hits[1].body, body);
+    CHECK_INT_EQ(hits[0].collider, upper);
+    CHECK_INT_EQ(hits[1].collider, lower);
+    CHECK_TRUE(hits[0].distance < hits[1].distance);
+    manager->shutdown();
+}
 #endif
 
 TEST_CASE(InvalidInputAndNullBackendClearOutput) {
