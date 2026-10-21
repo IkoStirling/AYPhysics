@@ -34,10 +34,19 @@ public:
     PhysResult createJoint(const JointDesc& desc, JointHandle& outHandle);
     PhysResult destroyJoint(JointHandle h);
 
+    /** Queue a legacy 2D ray. All origin/direction components must be finite.
+     * A zero XY direction keeps the legacy upward fallback. Returns a nonzero
+     * query ID on enqueue; zero means invalid geometry, stopped manager or full
+     * queue. Consume the result from a later PhysFrameSnapshot. */
     uint32_t   raycastAsync(const ayt::math::Ray& ray, PhysLayerMask layerMask = 0xFFFFFFFFu);
+    /** Queue a body-only XY circle overlap. Center must be finite and radius
+     * positive/finite. Zero indicates rejection; results arrive in a later
+     * PhysFrameSnapshot. */
     uint32_t   overlapSphereAsync(const ayt::math::FVector3& center, float radius,
                                   PhysLayerMask layerMask = 0xFFFFFFFFu);
-    // R1: axis-aligned box overlap (independent half-extents; no rotation).
+    /** Queue a body-only axis-aligned XY box overlap. Center and half-extents
+     * must be finite, with positive XY half-extents. Zero indicates rejection;
+     * results arrive in a later PhysFrameSnapshot. */
     uint32_t   overlapBoxAsync(const ayt::math::FVector3& center,
                                const ayt::math::FVector3& halfExtents,
                                PhysLayerMask layerMask = 0xFFFFFFFFu);

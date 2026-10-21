@@ -228,7 +228,10 @@ PhysResult PhysicsWorld2D::destroyJoint(JointHandle h) {
 
 uint32_t PhysicsWorld2D::raycastAsync(const ayt::math::Ray& ray, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!m || !m->isRunning() || !m->commandQueue2D()
+        || !std::isfinite(ray.origin.x) || !std::isfinite(ray.origin.y)
+        || !std::isfinite(ray.origin.z) || !std::isfinite(ray.dir.x)
+        || !std::isfinite(ray.dir.y) || !std::isfinite(ray.dir.z)) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::RaycastAsync;
     cmd.queryId = nextQueryId();
@@ -246,7 +249,10 @@ uint32_t PhysicsWorld2D::raycastAsync(const ayt::math::Ray& ray, PhysLayerMask l
 uint32_t PhysicsWorld2D::overlapSphereAsync(const ayt::math::FVector3& center, float radius,
                                             PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!m || !m->isRunning() || !m->commandQueue2D()
+        || !std::isfinite(center.x) || !std::isfinite(center.y)
+        || !std::isfinite(center.z) || !std::isfinite(radius)
+        || radius <= 0.0f) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::OverlapSphereAsync;
     cmd.queryId = nextQueryId();
@@ -265,7 +271,11 @@ uint32_t PhysicsWorld2D::overlapBoxAsync(const ayt::math::FVector3& center,
                                         const ayt::math::FVector3& halfExtents,
                                         PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;
-    if (!m) return 0;
+    if (!m || !m->isRunning() || !m->commandQueue2D()
+        || !std::isfinite(center.x) || !std::isfinite(center.y)
+        || !std::isfinite(center.z) || !std::isfinite(halfExtents.x)
+        || !std::isfinite(halfExtents.y) || !std::isfinite(halfExtents.z)
+        || halfExtents.x <= 0.0f || halfExtents.y <= 0.0f) return 0;
     PhysicsCommand cmd{};
     cmd.type = PhysicsCommandType::OverlapBoxAsync;
     cmd.queryId = nextQueryId();

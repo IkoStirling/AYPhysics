@@ -87,4 +87,40 @@ TEST_CASE(NullQueriesPreserveLegacyEmptyResultAndShutdownReturnsImmediately) {
     CHECK_TRUE(bodies.empty());
 }
 
+TEST_CASE(AsyncQueriesRejectInvalidGeometryBeforeQueueing) {
+    PhysicsBackendDescriptor descriptor;
+    descriptor.kind3D = BackendKind::Null;
+    descriptor.kind2D = BackendKind::Null;
+    auto manager = PhysicsManager::create(descriptor);
+    CHECK_TRUE(manager != nullptr);
+    auto* world = manager->world2D();
+    const float infinity = (std::numeric_limits<float>::infinity)();
+    const float nan = (std::numeric_limits<float>::quiet_NaN)();
+
+    ayt::math::Ray ray;
+    ray.dir = {1.0f, 0.0f, 0.0f};
+    ray.origin.z = infinity;
+    CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+    ray.origin = {};
+    ray.dir.x = nan;
+    CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+    ray.dir = {1.0f, 0.0f, 0.0f};
+    CHECK_TRUE(world->raycastAsync(ray) != 0u);
+
+    CHECK_INT_EQ(world->overlapSphereAsync({}, 0.0f), 0u);
+    CHECK_INT_EQ(world->overlapSphereAsync({infinity, 0.0f, 0.0f}, 1.0f), 0u);
+    CHECK_INT_EQ(world->overlapSphereAsync({}, nan), 0u);
+    CHECK_TRUE(world->overlapSphereAsync({}, 1.0f) != 0u);
+
+    CHECK_INT_EQ(world->overlapBoxAsync({}, {0.0f, 1.0f, 0.0f}), 0u);
+    CHECK_INT_EQ(world->overlapBoxAsync({}, {1.0f, 1.0f, infinity}), 0u);
+    CHECK_INT_EQ(world->overlapBoxAsync({nan, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}), 0u);
+    CHECK_TRUE(world->overlapBoxAsync({}, {1.0f, 1.0f, 0.0f}) != 0u);
+
+    manager->shutdown();
+    CHECK_INT_EQ(world->raycastAsync(ray), 0u);
+    CHECK_INT_EQ(world->overlapSphereAsync({}, 1.0f), 0u);
+    CHECK_INT_EQ(world->overlapBoxAsync({}, {1.0f, 1.0f, 0.0f}), 0u);
+}
+
 TEST_SUITE_END

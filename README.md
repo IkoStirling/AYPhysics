@@ -8,6 +8,9 @@ caller output on errors or misses. They reject non-finite geometry and
 non-positive overlap size before submitting to the physics worker, and return
 `InvalidState` promptly after shutdown. Valid legacy overlap queries keep
 their historical `Ok`/empty result with Null 2D.
+The corresponding legacy async queries reject the same invalid geometry and
+return query ID zero if the manager is stopped or the command cannot enqueue.
+Valid async results remain available through a later `PhysFrameSnapshot`.
 The shared synchronous query mailbox retains a slot while a timed-out request
 is still executing on the physics worker. Its late response is discarded and
 the slot returns to the pool only after backend execution finishes, so a new

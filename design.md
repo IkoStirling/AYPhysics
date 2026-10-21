@@ -23,6 +23,12 @@ retains its historical `Ok`/empty behavior; the newer finite-segment and
 shape queries report `Unsupported` there. The legacy ray keeps its historical
 1000-unit direction and zero-XY fallback until a separate API migration.
 
+**2D legacy async query admission (2026-10-22):** the three legacy async
+ray/overlap entry points use the same finite-input and positive-overlap-size
+checks before enqueue. Rejected geometry, a stopped manager or a full queue
+returns query ID zero; no debug query is recorded. A successful nonzero ID
+still identifies a result in a later frame snapshot, not an immediate answer.
+
 **Sync mailbox timeout ownership (2026-10-22):** a slot that times out while
 the physics worker is executing its request is abandoned, not returned to the
 free list. The worker discards the late response and releases that slot only
