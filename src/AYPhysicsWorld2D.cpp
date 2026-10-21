@@ -491,6 +491,59 @@ PhysResult PhysicsWorld2D::overlapCapsuleSync(
     }
 }
 
+PhysResult PhysicsWorld2D::overlapOrientedBoxSync(
+    const OrientedBoxOverlap2D& query, std::vector<BodyHandle>& out) {
+    out.clear();
+    try {
+        const auto finite = [](const auto& value) {
+            return std::isfinite(value.x) && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        };
+        if (!finite(query.center) || !finite(query.halfExtents)
+            || query.halfExtents.x <= 0.0f
+            || query.halfExtents.y <= 0.0f
+            || query.halfExtents.x > 1000.0f
+            || query.halfExtents.y > 1000.0f
+            || !std::isfinite(query.angleRadians)
+            || query.ignoredBodies.size() > 64u) {
+            return PhysResult::InvalidParam;
+        }
+        PhysicsManager* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+            return PhysResult::InvalidState;
+        }
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::OrientedBoxOverlap2D;
+        request.requestId = nextQueryId();
+        request.orientedBoxOverlap2D = query;
+        PhysicsDebugQuery debug;
+        debug.type = SyncQueryType::OrientedBoxOverlap2D;
+        debug.dimension = PhysicsDimension::TwoD;
+        debug.queryId = request.requestId;
+        debug.layerMask = query.layerMask;
+        debug.center = query.center;
+        debug.halfExtents = query.halfExtents;
+        debug.rotation = ayt::math::FQuaternion::fromAxisAngle(
+            {0.0f, 0.0f, 1.0f}, query.angleRadians);
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox2D()->submitAndWait(
+                request, response, 1000 * 1000)) {
+            (void)manager->debugDraw().record(
+                debug, PhysResult::BackendError, false);
+            return PhysResult::BackendError;
+        }
+        if (response.status == PhysResult::Ok) {
+            out = std::move(response.overlaps);
+        }
+        (void)manager->debugDraw().record(
+            debug, response.status, !out.empty(), nullptr, &out);
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
+}
+
 PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                              std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
     PhysicsManager* m = _manager;

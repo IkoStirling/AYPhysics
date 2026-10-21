@@ -1400,3 +1400,17 @@ output with `Ok` means no overlap; Null 2D reports `Unsupported`. Invalid
 input, unavailable manager, backend failure and allocation failure clear the
 output. This is a geometry query, not a controller movement command. Debug
 history draws the queried capsule and lists accepted bodies.
+
+## 2D oriented box overlap query (2026-10-22)
+
+`PhysicsWorld2D::overlapOrientedBoxSync` inspects a rotated XY rectangle at
+one center without moving it. Center and XY angle must be finite; both XY
+half-extents are in (0, 1000], and at most 64 body handles may be ignored.
+The Box2D query rotates the four corners into world space and uses their
+zero-radius convex proxy. Layer masks and optional sensor inclusion filter
+candidates. Results are unique, generation-checked body handles in ascending
+order. An empty `Ok` result is a miss; bad input, unavailable manager, backend
+failure, and allocation failure clear output. The Null 2D backend returns
+`Unsupported`. Debug history renders the rotated outline and accepted bodies.
+This is a read-only gameplay query; it does not rotate an existing collider,
+change controller ownership or affect lockstep authority.

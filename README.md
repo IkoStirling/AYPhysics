@@ -19,6 +19,9 @@ when height equals diameter. Null 2D reports `Unsupported`.
 `PhysicsWorld2D::overlapCapsuleSync` checks an upright capsule at one center
 and returns sorted unique body handles. It supports layer masks, ignored bodies
 and optional sensors; a valid empty result differs from Null `Unsupported`.
+`PhysicsWorld2D::overlapOrientedBoxSync` checks a rotated XY rectangle with the
+same filters and sorted unique body results. Its angle is counterclockwise in
+radians, and it leaves the simulation unchanged; Null 2D returns `Unsupported`.
 Jolt now preserves multiple colliders as a compound, removes their geometry on
 destruction, honors ray layer masks and returns real surface normals. Body-only
 overlaps do not identify an individual shape.

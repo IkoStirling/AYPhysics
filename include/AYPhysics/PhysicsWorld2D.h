@@ -114,6 +114,16 @@ public:
      */
     PhysResult overlapCapsuleSync(const CapsuleOverlap2D& query,
                                   std::vector<BodyHandle>& out);
+    /**
+     * Find bodies inside a counterclockwise rotated XY rectangle.
+     * Finite center, angle and half-extents are required; XY extents are in
+     * (0,1000]. Z is validated but ignored by Box2D. Layer, sensor and up to
+     * 64 ignored-body filters apply. Results are unique ascending handles.
+     * Output is cleared on failure or miss. Null 2D returns Unsupported.
+     * Call from the game thread; this waits for the physics worker.
+     */
+    PhysResult overlapOrientedBoxSync(const OrientedBoxOverlap2D& query,
+                                      std::vector<BodyHandle>& out);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);

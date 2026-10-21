@@ -264,7 +264,16 @@ struct CapsuleOverlap2D {
     std::vector<BodyHandle> ignoredBodies;
     bool includeSensors = false;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D };
+/// Rotated XY rectangle overlap; angle is counterclockwise radians about Z.
+struct OrientedBoxOverlap2D {
+    ayt::math::FVector3 center{};
+    ayt::math::FVector3 halfExtents{0.5f, 0.5f, 0.0f};
+    float angleRadians = 0.0f;
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
@@ -273,6 +282,7 @@ struct SyncQueryRequest {
     BoxSweep2D boxSweep2D{};
     CapsuleSweep2D capsuleSweep2D{};
     CapsuleOverlap2D capsuleOverlap2D{};
+    OrientedBoxOverlap2D orientedBoxOverlap2D{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;
