@@ -10,6 +10,9 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <new>
+#include <type_traits>
+#include <utility>
 
 namespace ayt::physics {
 
@@ -198,8 +201,14 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
         _freeList.pop_back();
     }
     PendingSlot& slot = _slots[slotIdx];
-    slot.request = request;
-    slot.response = {};
+    try {
+        slot.request = request;
+        slot.response = {};
+    } catch (...) {
+        std::lock_guard<std::mutex> lk(internal->mu);
+        _freeList.push_back(slotIdx);
+        throw;
+    }
     slot.ready.store(false, std::memory_order_release);
     _pendingMask.fetch_or(uint64_t(1) << slotIdx, std::memory_order_release);
 
@@ -241,7 +250,8 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
         }
     }
 
-    outResponse = slot.response;
+    static_assert(std::is_nothrow_move_assignable_v<SyncQueryResponse>);
+    outResponse = std::move(slot.response);
     // Release the slot back to the pool + clear the pending bit.
     _pendingMask.fetch_and(~(uint64_t(1) << slotIdx), std::memory_order_release);
     {
@@ -271,8 +281,18 @@ void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
 
         SyncQueryResponse resp;
         resp.requestId = slot.request.requestId;
-        backend->executeSync(slot.request, resp);
-        slot.response = resp;
+        try {
+            backend->executeSync(slot.request, resp);
+        } catch (const std::bad_alloc&) {
+            resp.status = PhysResult::NoMemory;
+            resp.firstHit = {};
+            resp.overlaps.clear();
+        } catch (...) {
+            resp.status = PhysResult::BackendError;
+            resp.firstHit = {};
+            resp.overlaps.clear();
+        }
+        slot.response = std::move(resp);
         slot.ready.store(true, std::memory_order_release);
 
         auto* internal = static_cast<SyncQueryMailboxInternal*>(_cv);

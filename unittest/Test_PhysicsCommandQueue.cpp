@@ -1,10 +1,35 @@
 #include "AYPhysics/PhysicsCommandQueue.h"
+#include "AYPhysics/IPhysicsBackend.h"
 
 #include "AYTest.h"
 
 #include "AYPlatform/Thread.h"
 
+#include <atomic>
+#include <new>
+#include <thread>
+
 using namespace ayt::physics;
+
+namespace {
+class MailboxVectorBackend final : public IPhysicsBackend {
+public:
+    std::atomic<bool> failNext{false};
+    bool start(const PhysicsBackendInfo&) override { return true; }
+    void stop() override {}
+    void step(float) override {}
+    void publishSnapshot(PhysFrameSnapshot&) override {}
+    void execute(const PhysicsCommand&, const PhysicsCreatePayload*) override {}
+    void executeSync(const SyncQueryRequest&, SyncQueryResponse& response) override {
+        response.overlaps = {17u, 23u};
+        if (failNext.exchange(false)) {
+            throw std::bad_alloc{};
+        }
+    }
+    PhysicsBackendInfo describe() const override { return {}; }
+    bool isRealDevice() const override { return false; }
+};
+}
 
 TEST_SUITE(PhysicsCommandQueueTests)
 
@@ -110,6 +135,40 @@ TEST_SUITE(PhysicsCommandQueueTests)
         consumer.join();
         CHECK_INT_EQ(q.approximateDepth(), 0u);
         q.shutdown();
+    }
+
+    TEST_CASE(SyncMailboxTransfersVectorsAndReusesSlotAfterBackendFailure) {
+        SyncQueryMailbox mailbox;
+        CHECK_TRUE(mailbox.initialize(1u));
+        MailboxVectorBackend backend;
+        std::atomic<bool> stop{false};
+        std::thread worker([&] {
+            while (!stop.load(std::memory_order_acquire)) {
+                mailbox.serviceAll(&backend);
+                ayt::platform::Thread::yield();
+            }
+        });
+        SyncQueryRequest request{};
+        request.requestId = 41u;
+        SyncQueryResponse response{};
+        CHECK_TRUE(mailbox.submitAndWait(request, response, 1000 * 1000));
+        CHECK_TRUE(response.status == PhysResult::Ok);
+        CHECK_INT_EQ(response.overlaps.size(), 2u);
+        CHECK_INT_EQ(response.overlaps.front(), 17u);
+
+        backend.failNext = true;
+        request.requestId = 42u;
+        CHECK_TRUE(mailbox.submitAndWait(request, response, 1000 * 1000));
+        CHECK_TRUE(response.status == PhysResult::NoMemory);
+        CHECK_TRUE(response.overlaps.empty());
+
+        request.requestId = 43u;
+        CHECK_TRUE(mailbox.submitAndWait(request, response, 1000 * 1000));
+        CHECK_TRUE(response.status == PhysResult::Ok);
+        CHECK_INT_EQ(response.overlaps.size(), 2u);
+        stop.store(true, std::memory_order_release);
+        worker.join();
+        mailbox.shutdown();
     }
 
 TEST_SUITE_END

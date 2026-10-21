@@ -1414,3 +1414,16 @@ failure, and allocation failure clear output. The Null 2D backend returns
 `Unsupported`. Debug history renders the rotated outline and accepted bodies.
 This is a read-only gameplay query; it does not rotate an existing collider,
 change controller ownership or affect lockstep authority.
+
+## Sync query mailbox response ownership (2026-10-22)
+
+The mailbox keeps its small slot pool across requests. Request preparation may
+copy ignored-body vectors; if that copy throws before publication, the claimed
+slot returns to the free list and no pending bit is set. After the physics
+worker completes a request, the response moves from worker scratch into the
+slot and then into the waiting caller, avoiding a second allocation for
+overlap or future multi-hit arrays. A backend allocation exception becomes a
+`NoMemory` response, and other backend exceptions become `BackendError`; no
+partial hit array escapes. The worker marks the slot ready after publishing
+the response. This hardens allocation failure and result ownership without
+changing query order, timeout duration, or existing timeout behavior.
