@@ -182,8 +182,10 @@ public:
     bool initialize(uint32_t capacity);
     void shutdown();
 
-    // Game thread: blocks until response or shutdown.
-    // timeoutMicroseconds < 0 = wait forever. 0 = non-blocking.
+    // Game thread: blocks until response or timeout. A timeout during backend
+    // execution abandons the slot; the worker reclaims it after completion.
+    // timeoutMicroseconds < 0 = wait forever. 0 = non-blocking. Call shutdown
+    // only after producers and the physics worker have stopped.
     bool submitAndWait(const SyncQueryRequest& request,
                        SyncQueryResponse& outResponse,
                        int64_t timeoutMicroseconds);
@@ -193,8 +195,11 @@ public:
     void serviceAll(IPhysicsBackend* backend);
 
 private:
+    enum class SlotState : uint8_t {
+        Free, Pending, Executing, Completed, Abandoned,
+    };
     struct PendingSlot {
-        std::atomic<bool> ready{false};
+        std::atomic<SlotState> state{SlotState::Free};
         SyncQueryRequest request{};
         SyncQueryResponse response{};
         PendingSlot() = default;
@@ -206,8 +211,9 @@ private:
 
     std::unique_ptr<PendingSlot[]> _slots;
     std::vector<uint32_t>    _freeList;     // pool indices
-    // F-H/I — bit i = slot i is currently in flight (game thread claimed it
-    // from _freeList, hasn't received its response yet). Lets serviceAll skip
+    // Bit i marks a slot that may need worker attention. SlotState owns the
+    // request lifetime, including a worker still finishing after timeout.
+    // The mask lets serviceAll skip
     // the per-slot linear _freeList scan and run in O(popcount) instead of
     // O(N^2). Capacity is capped at 64 (kSyncQueryMailboxCapacity), so a
     // single uint64_t covers every slot.

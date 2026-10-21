@@ -6,6 +6,7 @@
 #include "AYPlatform/Thread.h"
 
 #include <atomic>
+#include <chrono>
 #include <new>
 #include <thread>
 
@@ -25,6 +26,29 @@ public:
         if (failNext.exchange(false)) {
             throw std::bad_alloc{};
         }
+    }
+    PhysicsBackendInfo describe() const override { return {}; }
+    bool isRealDevice() const override { return false; }
+};
+
+class BlockingMailboxBackend final : public IPhysicsBackend {
+public:
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+    bool start(const PhysicsBackendInfo&) override { return true; }
+    void stop() override {}
+    void step(float) override {}
+    void publishSnapshot(PhysFrameSnapshot&) override {}
+    void execute(const PhysicsCommand&, const PhysicsCreatePayload*) override {}
+    void executeSync(const SyncQueryRequest& request,
+                     SyncQueryResponse& response) override {
+        if (request.requestId == 1u) {
+            entered.store(true, std::memory_order_release);
+            while (!release.load(std::memory_order_acquire)) {
+                ayt::platform::Thread::yield();
+            }
+        }
+        response.requestId = request.requestId;
     }
     PhysicsBackendInfo describe() const override { return {}; }
     bool isRealDevice() const override { return false; }
@@ -165,6 +189,77 @@ TEST_SUITE(PhysicsCommandQueueTests)
         request.requestId = 43u;
         CHECK_TRUE(mailbox.submitAndWait(request, response, 1000 * 1000));
         CHECK_TRUE(response.status == PhysResult::Ok);
+        CHECK_INT_EQ(response.overlaps.size(), 2u);
+        stop.store(true, std::memory_order_release);
+        worker.join();
+        mailbox.shutdown();
+    }
+
+    TEST_CASE(TimedOutExecutingQueryCannotReplyToNextRequest) {
+        SyncQueryMailbox mailbox;
+        CHECK_TRUE(mailbox.initialize(1u));
+        BlockingMailboxBackend backend;
+        std::atomic<bool> stop{false};
+        std::thread worker([&] {
+            while (!stop.load(std::memory_order_acquire)) {
+                mailbox.serviceAll(&backend);
+                ayt::platform::Thread::yield();
+            }
+        });
+        bool firstSucceeded = true;
+        std::thread first([&] {
+            SyncQueryRequest request{};
+            request.requestId = 1u;
+            SyncQueryResponse response{};
+            firstSucceeded = mailbox.submitAndWait(request, response, 100000);
+        });
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::seconds(1);
+        while (!backend.entered.load(std::memory_order_acquire)
+               && std::chrono::steady_clock::now() < deadline) {
+            ayt::platform::Thread::yield();
+        }
+        const bool entered = backend.entered.load(std::memory_order_acquire);
+        first.join();
+        CHECK_TRUE(entered);
+        CHECK_FALSE(firstSucceeded);
+
+        std::thread unblock([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            backend.release.store(true, std::memory_order_release);
+        });
+        SyncQueryRequest second{};
+        second.requestId = 2u;
+        SyncQueryResponse response{};
+        const bool secondSucceeded = mailbox.submitAndWait(
+            second, response, 1000 * 1000);
+        unblock.join();
+        CHECK_TRUE(secondSucceeded);
+        CHECK_INT_EQ(response.requestId, 2u);
+        stop.store(true, std::memory_order_release);
+        worker.join();
+        mailbox.shutdown();
+    }
+
+    TEST_CASE(UnclaimedTimeoutReleasesSlotForLaterQuery) {
+        SyncQueryMailbox mailbox;
+        CHECK_TRUE(mailbox.initialize(1u));
+        SyncQueryRequest request{};
+        request.requestId = 10u;
+        SyncQueryResponse response{};
+        CHECK_FALSE(mailbox.submitAndWait(request, response, 0));
+
+        MailboxVectorBackend backend;
+        std::atomic<bool> stop{false};
+        std::thread worker([&] {
+            while (!stop.load(std::memory_order_acquire)) {
+                mailbox.serviceAll(&backend);
+                ayt::platform::Thread::yield();
+            }
+        });
+        request.requestId = 11u;
+        CHECK_TRUE(mailbox.submitAndWait(request, response, 1000 * 1000));
+        CHECK_INT_EQ(response.requestId, 11u);
         CHECK_INT_EQ(response.overlaps.size(), 2u);
         stop.store(true, std::memory_order_release);
         worker.join();

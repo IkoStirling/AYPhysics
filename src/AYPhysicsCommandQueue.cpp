@@ -209,56 +209,59 @@ bool SyncQueryMailbox::submitAndWait(const SyncQueryRequest& request,
         _freeList.push_back(slotIdx);
         throw;
     }
-    slot.ready.store(false, std::memory_order_release);
+    slot.state.store(SlotState::Pending, std::memory_order_release);
     _pendingMask.fetch_or(uint64_t(1) << slotIdx, std::memory_order_release);
 
-    // Wait for slot.ready to become true.
+    // Wait for the worker to publish a complete response.
     //
     // We pass the timeout through ayt::time::Duration (AYTime v1.2 value-type,
     // 0 alloc, constexpr) and convert at the cv.wait_for boundary via
     // toChronoMicroseconds(). This keeps the wait duration expressed in
     // engine units while std::condition_variable still receives the chrono
     // duration it requires. Mirrors AYGameLoop's queue wait.
-    auto waitUntil = [&]() {
-        std::unique_lock<std::mutex> lk(internal->mu);
-        const auto timeout = ayt::time::Duration::fromUs(timeoutMicroseconds)
-                                 .toChronoMicroseconds();
-        internal->cv.wait_for(lk, timeout,
-                              [&]() { return slot.ready.load(std::memory_order_acquire); });
-    };
     auto releaseSlot = [&]() {
-        // F-H/I — timed-out / error path. Clear the pending bit so serviceAll
-        // doesn't service a stale request once the response finally arrives,
-        // and push the slot back to the free list.
         _pendingMask.fetch_and(~(uint64_t(1) << slotIdx), std::memory_order_release);
+        slot.state.store(SlotState::Free, std::memory_order_release);
         std::lock_guard<std::mutex> lk(internal->mu);
         _freeList.push_back(slotIdx);
     };
-    if (timeoutMicroseconds < 0) {
+    if (timeoutMicroseconds != 0) {
         std::unique_lock<std::mutex> lk(internal->mu);
-        internal->cv.wait(lk, [&]() { return slot.ready.load(std::memory_order_acquire); });
-    } else if (timeoutMicroseconds == 0) {
-        if (!slot.ready.load(std::memory_order_acquire)) {
+        const auto complete = [&]() {
+            return slot.state.load(std::memory_order_acquire)
+                == SlotState::Completed;
+        };
+        if (timeoutMicroseconds < 0) {
+            internal->cv.wait(lk, complete);
+        } else {
+            const auto timeout = ayt::time::Duration::fromUs(timeoutMicroseconds)
+                                     .toChronoMicroseconds();
+            internal->cv.wait_for(lk, timeout, complete);
+        }
+    }
+    for (;;) {
+        SlotState state = slot.state.load(std::memory_order_acquire);
+        if (state == SlotState::Completed) {
+            static_assert(std::is_nothrow_move_assignable_v<SyncQueryResponse>);
+            outResponse = std::move(slot.response);
+            releaseSlot();
+            return true;
+        }
+        if (state == SlotState::Pending
+            && slot.state.compare_exchange_weak(state, SlotState::Free,
+                std::memory_order_acq_rel)) {
             releaseSlot();
             return false;
         }
-    } else {
-        waitUntil();
-        if (!slot.ready.load(std::memory_order_acquire)) {
-            releaseSlot();
+        if (state == SlotState::Executing
+            && slot.state.compare_exchange_weak(state, SlotState::Abandoned,
+                std::memory_order_acq_rel)) {
+            // The worker still owns this slot. It will discard its late
+            // response and return the slot only after executeSync finishes.
             return false;
         }
+        // A worker may have completed between the timeout and the CAS.
     }
-
-    static_assert(std::is_nothrow_move_assignable_v<SyncQueryResponse>);
-    outResponse = std::move(slot.response);
-    // Release the slot back to the pool + clear the pending bit.
-    _pendingMask.fetch_and(~(uint64_t(1) << slotIdx), std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> lk(internal->mu);
-        _freeList.push_back(slotIdx);
-    }
-    return true;
 }
 
 void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
@@ -274,10 +277,9 @@ void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
         pending &= pending - 1;  // clear lowest set bit
 
         PendingSlot& slot = _slots[slotIdx];
-        // Defensive: if the slot already became ready (game thread reaped
-        // the response while we were running) the pending bit should have
-        // been cleared already. Skip — but DON'T clear the bit again.
-        if (slot.ready.load(std::memory_order_acquire)) continue;
+        SlotState expected = SlotState::Pending;
+        if (!slot.state.compare_exchange_strong(expected, SlotState::Executing,
+                std::memory_order_acq_rel)) continue;
 
         SyncQueryResponse resp;
         resp.requestId = slot.request.requestId;
@@ -296,10 +298,20 @@ void SyncQueryMailbox::serviceAll(IPhysicsBackend* backend) {
             resp.rayHits.clear();
             resp.colliderOverlaps.clear();
         }
-        slot.response = std::move(resp);
-        slot.ready.store(true, std::memory_order_release);
-
         auto* internal = static_cast<SyncQueryMailboxInternal*>(_cv);
+        slot.response = std::move(resp);
+        expected = SlotState::Executing;
+        if (!slot.state.compare_exchange_strong(expected, SlotState::Completed,
+                std::memory_order_release)) {
+            // A timed-out caller marked the executing request abandoned.
+            // Nobody may reuse the slot until this backend call has ended.
+            _pendingMask.fetch_and(~(uint64_t(1) << slotIdx),
+                                   std::memory_order_release);
+            slot.state.store(SlotState::Free, std::memory_order_release);
+            std::lock_guard<std::mutex> lk(internal->mu);
+            _freeList.push_back(slotIdx);
+            continue;
+        }
         {
             std::lock_guard<std::mutex> lk(internal->mu);
             internal->cv.notify_all();

@@ -8,6 +8,10 @@ caller output on errors or misses. They reject non-finite geometry and
 non-positive overlap size before submitting to the physics worker, and return
 `InvalidState` promptly after shutdown. Valid legacy overlap queries keep
 their historical `Ok`/empty result with Null 2D.
+The shared synchronous query mailbox retains a slot while a timed-out request
+is still executing on the physics worker. Its late response is discarded and
+the slot returns to the pool only after backend execution finishes, so a new
+query cannot receive a prior request's result.
 `PhysicsWorld2D::raycastAllSync` casts a finite XY segment and returns every
 eligible exact collider hit in distance order. It supports layer masks,
 ignored bodies and optional sensors; its explicit hit limit rejects overflow

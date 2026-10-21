@@ -23,6 +23,15 @@ retains its historical `Ok`/empty behavior; the newer finite-segment and
 shape queries report `Unsupported` there. The legacy ray keeps its historical
 1000-unit direction and zero-XY fallback until a separate API migration.
 
+**Sync mailbox timeout ownership (2026-10-22):** a slot that times out while
+the physics worker is executing its request is abandoned, not returned to the
+free list. The worker discards the late response and releases that slot only
+after backend execution finishes. A pending request that the worker has not
+claimed can be cancelled and released immediately. Per-slot atomic state
+transitions distinguish pending, executing, completed and abandoned requests;
+the pending bit mask remains a scan accelerator, not the ownership authority.
+This prevents a later request from receiving an earlier timed-out response.
+
 **2026-10-03 controller extension:** `PhysicsWorld3D` queues create/destroy/input/
 teleport commands; the descriptor remains out of band in `PhysicsCreatePool`
 and the compact command stays <= 64 bytes. `CharacterVirtual` and its contact/
