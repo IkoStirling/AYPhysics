@@ -100,6 +100,20 @@ public:
      * worker and must never be called from that worker.
      */
     PhysResult capsuleSweepSync(const CapsuleSweep2D& sweep, RaycastHit& outHit);
+    /**
+     * @brief Find bodies overlapping an upright XY capsule at one center.
+     * @param query Finite center, radius (0,1000], total height
+     * [2*radius,2000], up to 64 ignored handles. Z is ignored by Box2D.
+     * @param out Cleared on failure or miss; successful results are unique
+     * generation-checked body handles in ascending order.
+     * @return Ok even for an empty result, InvalidParam for a bad request,
+     * InvalidState when the manager is unavailable, BackendError on timeout,
+     * NoMemory on response allocation failure, or Unsupported on Null 2D.
+     * @threading Call from the game/simulation thread; waits for the physics
+     * worker and must never be called from that worker.
+     */
+    PhysResult overlapCapsuleSync(const CapsuleOverlap2D& query,
+                                  std::vector<BodyHandle>& out);
     PhysResult overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask = 0xFFFFFFFFu);

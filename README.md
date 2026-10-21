@@ -16,6 +16,9 @@ failure behavior as circle sweep; Null 2D reports `Unsupported`.
 including its round ends. It reports the closest collider and center travel,
 supports the same filters and failure behavior, and accepts a circular capsule
 when height equals diameter. Null 2D reports `Unsupported`.
+`PhysicsWorld2D::overlapCapsuleSync` checks an upright capsule at one center
+and returns sorted unique body handles. It supports layer masks, ignored bodies
+and optional sensors; a valid empty result differs from Null `Unsupported`.
 Jolt now preserves multiple colliders as a compound, removes their geometry on
 destruction, honors ray layer masks and returns real surface normals. Body-only
 overlaps do not identify an individual shape.

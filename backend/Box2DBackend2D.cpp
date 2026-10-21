@@ -1160,6 +1160,54 @@ void Box2DBackend2D::executeSync(const SyncQueryRequest& request,
         }
         return;
     }
+    case SyncQueryType::CapsuleOverlap2D: {
+        const CapsuleOverlap2D& query = request.capsuleOverlap2D;
+        const float halfSegment = 0.5f * query.height - query.radius;
+        const b2Vec2 centers[2] = {
+            {query.center.x, query.center.y - halfSegment},
+            {query.center.x, query.center.y + halfSegment}};
+        const b2ShapeProxy proxy = b2MakeProxy(centers,
+            halfSegment == 0.0f ? 1 : 2, query.radius);
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        filter.maskBits = static_cast<uint64_t>(query.layerMask);
+        filter.categoryBits = ~0ull;
+        struct OverlapContext {
+            Impl* impl;
+            const CapsuleOverlap2D* query;
+            SyncQueryResponse* response;
+        } context{_impl.get(), &query, &outResponse};
+        auto accept = [](b2ShapeId shape, void* data) -> bool {
+            auto& overlap = *static_cast<OverlapContext*>(data);
+            if (!b2Shape_IsValid(shape)
+                || (!overlap.query->includeSensors
+                    && b2Shape_IsSensor(shape))) return true;
+            const BodyHandle body = resolveBodyHandle(
+                b2Shape_GetBody(shape), overlap.impl->bodyIdByIndex,
+                overlap.impl->bodyGeneration, overlap.impl->maxBodies);
+            if (!body || std::find(overlap.query->ignoredBodies.begin(),
+                overlap.query->ignoredBodies.end(), body)
+                != overlap.query->ignoredBodies.end()) return true;
+            auto& found = overlap.response->overlaps;
+            if (std::find(found.begin(), found.end(), body) != found.end()) {
+                return true;
+            }
+            try {
+                found.push_back(body);
+            } catch (...) {
+                overlap.response->status = PhysResult::NoMemory;
+                return false;
+            }
+            return true;
+        };
+        b2World_OverlapShape(_impl->worldId, &proxy, filter,
+                             accept, &context);
+        if (outResponse.status != PhysResult::Ok) {
+            outResponse.overlaps.clear();
+        } else {
+            std::sort(outResponse.overlaps.begin(), outResponse.overlaps.end());
+        }
+        return;
+    }
     case SyncQueryType::OverlapSphere:
     case SyncQueryType::OverlapBox: {
         const bool sphere=request.type==SyncQueryType::OverlapSphere;

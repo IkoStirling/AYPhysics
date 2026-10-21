@@ -3,6 +3,8 @@
 #include "AYPhysics/PhysicsManager.h"
 
 #include <cmath>
+#include <new>
+#include <utility>
 
 namespace ayt::physics {
 
@@ -440,6 +442,53 @@ PhysResult PhysicsWorld2D::capsuleSweepSync(const CapsuleSweep2D& sweep,
     (void)manager->debugDraw().record(
         debug, response.status, outHit.hit, &outHit);
     return response.status;
+}
+
+PhysResult PhysicsWorld2D::overlapCapsuleSync(
+    const CapsuleOverlap2D& query, std::vector<BodyHandle>& out) {
+    out.clear();
+    try {
+    if (!std::isfinite(query.center.x) || !std::isfinite(query.center.y)
+        || !std::isfinite(query.center.z)
+        || !std::isfinite(query.radius) || query.radius <= 0.0f
+        || query.radius > 1000.0f || !std::isfinite(query.height)
+        || query.height < 2.0f * query.radius || query.height > 2000.0f
+        || query.ignoredBodies.size() > 64u) {
+        return PhysResult::InvalidParam;
+    }
+    PhysicsManager* manager = _manager;
+    if (!manager || !manager->isRunning() || !manager->syncMailbox2D()) {
+        return PhysResult::InvalidState;
+    }
+    SyncQueryRequest request{};
+    request.type = SyncQueryType::CapsuleOverlap2D;
+    request.requestId = nextQueryId();
+    request.capsuleOverlap2D = query;
+    PhysicsDebugQuery debug;
+    debug.type = SyncQueryType::CapsuleOverlap2D;
+    debug.dimension = PhysicsDimension::TwoD;
+    debug.queryId = request.requestId;
+    debug.layerMask = query.layerMask;
+    debug.center = query.center;
+    debug.radius = query.radius;
+    debug.height = query.height;
+    SyncQueryResponse response{};
+    if (!manager->syncMailbox2D()->submitAndWait(
+            request, response, 1000 * 1000)) {
+        (void)manager->debugDraw().record(
+            debug, PhysResult::BackendError, false);
+        return PhysResult::BackendError;
+    }
+    if (response.status == PhysResult::Ok) {
+        out = std::move(response.overlaps);
+    }
+    (void)manager->debugDraw().record(
+        debug, response.status, !out.empty(), nullptr, &out);
+    return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
 }
 
 PhysResult PhysicsWorld2D::overlapSphereSync(const ayt::math::FVector3& center, float radius,

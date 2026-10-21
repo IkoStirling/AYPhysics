@@ -1388,3 +1388,15 @@ has zero distance. Layer masks, sensor inclusion, clear-on-failure behavior and
 Null-backend `Unsupported` match circle and box sweeps. Debug history draws the
 upright start/end capsule and center path. This is a read-only query, separate
 from controller motion ownership and deterministic collision state.
+
+## 2D capsule overlap query (2026-10-22)
+
+`PhysicsWorld2D::overlapCapsuleSync` tests an upright XY capsule at one center
+without moving it. Radius/total-height limits and the one-point circle form
+match capsule sweep; only finite center is required. The query returns unique,
+generation-checked body handles in ascending order. Layer masks, optional
+sensors and up to 64 ignored bodies apply before a result is accepted. Empty
+output with `Ok` means no overlap; Null 2D reports `Unsupported`. Invalid
+input, unavailable manager, backend failure and allocation failure clear the
+output. This is a geometry query, not a controller movement command. Debug
+history draws the queried capsule and lists accepted bodies.
