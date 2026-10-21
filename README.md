@@ -2,6 +2,16 @@
 
 AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint joints, with **2D and 3D as fully separated worlds**. Backend-pluggable (Jolt for 3D, Box2D for 2D).
 
+**Current architecture (2026-10-22):** `PhysicsManager` owns separate 2D and
+3D command queues and synchronous query mailboxes, serviced by one physics
+worker and a shared step/snapshot publication barrier. Box2D 3.x and Jolt are
+both integrated. `AYPhysics2DBridge` is a separate adapter for tile terrain,
+triggers and the 2D character controller; it is not the whole 2D physics API.
+The Phase/R2.5 table below records the original delivery plan and is not a
+current availability matrix. Use the [2D SDK contract](../../AYDocs/sdk/contracts/2d.md#2dphysicsraycast)
+and [architecture audit](../../AYDocs/AYPHYSICS-ARCHITECTURE-REVIEW-20261022.md)
+for the current query surface and remaining work.
+
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
 The original 2D `raycastSync`, `overlapSphereSync` and `overlapBoxSync` clear
 caller output on errors or misses. They reject non-finite geometry and

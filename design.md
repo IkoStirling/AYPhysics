@@ -3,6 +3,13 @@
 > **Status:** v0.5 (2026-07-31) — R1 + R1.5a + R1.5b + R1.5c shipped; R2.0a (ConvexHull + TriangleMesh + Heightfield shapes) next
 > **Backend:** Jolt 3D (locked, real impl via vcpkg `jolt-physics` 5.5.0) + Box2D 2D (locked, R2.5 parallel)
 
+> **Current reading note (2026-10-22):** the v0.5 status lines and Phase table
+> below preserve their original plan. Both native backends now run under one
+> `PhysicsManager` worker with separate world command queues and query mailboxes;
+> `AYPhysics2DBridge` is a separate adapter. See the
+> [current architecture audit](../../AYDocs/AYPHYSICS-ARCHITECTURE-REVIEW-20261022.md)
+> for delivered 2D query coverage, ownership boundaries and open work.
+
 Box2D and Jolt raycasts retain exact collider handles in `RaycastHit::collider`.
 Jolt now owns per-body collider lists and rebuilds tagged compounds on add/remove;
 compound child user data carries the complete handle, including generation.
