@@ -1,5 +1,14 @@
 # AYPhysics Design
 
+**2026-10-23 connected-space body transfer:** `TransferRigidbody3D` carries one
+out-of-band pool payload so the SPSC ring remains at most 64 bytes per command.
+The game thread validates finite pose/velocities and a Jolt layer below 32,
+allocates the payload, then publishes exactly one queue entry. Queue rejection
+reclaims the payload. On the worker, Jolt validates a live dynamic body before
+changing its collision group, object layer, pose and both velocities within one
+command dispatch. The next completed snapshot is the visibility boundary;
+cross-region body motion remains a teleport rather than a collision sweep.
+
 **2026-10-23 spatial gravity extension:** Game-thread `GravityField3D` owns at
 most 64 validated sources, ordered by priority then stable ID. Sampling is
 side-effect free; fixed-step callers dispatch acceleration using previous

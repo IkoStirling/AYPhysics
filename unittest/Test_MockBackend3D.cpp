@@ -86,4 +86,39 @@ TEST_SUITE(MockBackend3DTests)
         mgr->shutdown();
     }
 
+    TEST_CASE(TransferRigidbodyUsesOnePayloadAndOneQueueSlot) {
+        PhysicsBackendDescriptor desc;
+        desc.kind3D=BackendKind::Mock;
+        auto mgr=PhysicsManager::create(desc);
+        CHECK_NOT_NULL(mgr.get());
+        auto* world=mgr->world3D();
+        BodyHandle body=InvalidBodyHandle;
+        CHECK(world->createRigidbody(RigidbodyDesc{},body)==PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.f/60.f)==PhysResult::Ok);
+        testaccess::reset();
+        CHECK(world->transferRigidbody(body,{10,2,3},{0,0,0,1},
+            {1,2,3},{4,5,6},3,1u<<3)==PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.f/60.f)==PhysResult::Ok);
+        const auto& commands=testaccess::mockBackendCommands();
+        const auto& payloads=testaccess::mockBackendCreatePayloads();
+        CHECK(commands.size()==1);CHECK(payloads.size()==1);
+        if(commands.size()==1 && payloads.size()==1) {
+            CHECK(commands[0].type==PhysicsCommandType::TransferRigidbody3D);
+            CHECK(commands[0].body==body);
+            CHECK(payloads[0].kind==PhysicsCreatePayload::Kind::BodyTransfer3D);
+            const auto& transfer=payloads[0].bodyTransfer3D;
+            CHECK_FLOAT_EQ(transfer.position.x,10,1e-5f);
+            CHECK_FLOAT_EQ(transfer.linearVelocity.z,3,1e-5f);
+            CHECK_FLOAT_EQ(transfer.angularVelocity.y,5,1e-5f);
+            CHECK(transfer.layer==3);CHECK(transfer.collideMask==(1u<<3));
+        }
+        testaccess::reset();
+        CHECK(world->transferRigidbody(body,{},{0,0,0,0},{},{},3,1u<<3)
+              ==PhysResult::InvalidParam);
+        CHECK(world->transferRigidbody(body,{},{0,0,0,1},{},{},32,0)
+              ==PhysResult::InvalidParam);
+        CHECK(testaccess::mockBackendCommands().empty());
+        mgr->shutdown();
+    }
+
 TEST_SUITE_END

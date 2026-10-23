@@ -149,6 +149,36 @@ PhysResult PhysicsWorld3D::setRigidbodyTransform(BodyHandle h, const ayt::math::
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld3D::transferRigidbody(BodyHandle h,
+    const ayt::math::FVector3& position, const ayt::math::FQuaternion& rotation,
+    const ayt::math::FVector3& linearVelocity,
+    const ayt::math::FVector3& angularVelocity, PhysLayer layer,
+    PhysLayerMask collideMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->isRunning() || !m->commandQueue() || !m->createPool())
+        return PhysResult::InvalidState;
+    const float rotationLengthSq = rotation.dot(rotation);
+    if (!isValidHandle(h) || !finiteVector(position) || !finiteVector(linearVelocity)
+        || !finiteVector(angularVelocity) || !std::isfinite(rotationLengthSq)
+        || std::fabs(rotationLengthSq-1.0f)>1.0e-3f || layer >= 32)
+        return PhysResult::InvalidParam;
+    PhysicsCreatePayload payload{};
+    payload.kind = PhysicsCreatePayload::Kind::BodyTransfer3D;
+    payload.bodyTransfer3D = {position,rotation,linearVelocity,angularVelocity,
+                              layer,collideMask};
+    const CreateSlotId slot = m->createPool()->allocate(payload);
+    if (slot == InvalidCreateSlotId) return PhysResult::NoMemory;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::TransferRigidbody3D;
+    cmd.body = h;
+    cmd.createSlot = slot;
+    if (!m->commandQueue()->tryPush(cmd)) {
+        (void)m->createPool()->take(slot,payload);
+        return PhysResult::QueueFull;
+    }
+    return PhysResult::Ok;
+}
+
 PhysResult PhysicsWorld3D::applyForce(BodyHandle h, const ayt::math::FVector3& f) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue()) return PhysResult::InvalidState;

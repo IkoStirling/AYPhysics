@@ -39,6 +39,16 @@ public:
     PhysResult createRigidbody(const RigidbodyDesc& desc, BodyHandle& outHandle);
     PhysResult    destroyRigidbody(BodyHandle h);
     PhysResult    setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p, const ayt::math::FQuaternion& r);
+    /** Enqueue one fixed-step transition of a dynamic body's pose, both velocities,
+     * object layer and collision mask. Ok means one command was admitted; call
+     * stepAndWait before consuming its snapshot. Rejection changes nothing.
+     * Rotation must be a finite unit quaternion. Use disjoint region
+     * layers/masks when moving between connected spaces. */
+    PhysResult transferRigidbody(BodyHandle h, const ayt::math::FVector3& position,
+        const ayt::math::FQuaternion& rotation,
+        const ayt::math::FVector3& linearVelocity,
+        const ayt::math::FVector3& angularVelocity,
+        PhysLayer layer, PhysLayerMask collideMask);
     PhysResult    applyForce(BodyHandle h, const ayt::math::FVector3& f);
     /// Mass-independent world-space acceleration, enqueued before the physics step.
     /// Intended for spatial gravity fields; dynamic bodies only.

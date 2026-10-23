@@ -7,6 +7,9 @@ AY Engine physics subsystem: rigidbody dynamics, collision detection, constraint
 worker and a shared step/snapshot publication barrier. Box2D 3.x and Jolt are
 both integrated. `AYPhysics2DBridge` is a separate adapter for tile terrain,
 triggers and the 2D character controller; it is not the whole 2D physics API.
+For connected 3D regions, `PhysicsWorld3D::transferRigidbody` admits one
+pose/linear/angular velocity and layer/mask transition command. The Jolt worker
+applies it before the next fixed step; rejected queue admission changes nothing.
 The Phase/R2.5 table below records the original delivery plan and is not a
 current availability matrix. Use the [2D SDK contract](../../AYDocs/sdk/contracts/2d.md#2dphysicsraycast)
 and [architecture audit](../../AYDocs/AYPHYSICS-ARCHITECTURE-REVIEW-20261022.md)

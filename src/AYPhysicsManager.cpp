@@ -288,7 +288,8 @@ void PhysicsManager::_physicsThreadMain() {
                 cmd.type == PhysicsCommandType::CreateCollider ||
                 cmd.type == PhysicsCommandType::CreateJoint ||
                 cmd.type == PhysicsCommandType::CreateCharacter ||
-                cmd.type == PhysicsCommandType::OverlapBoxAsync) {
+                cmd.type == PhysicsCommandType::OverlapBoxAsync ||
+                cmd.type == PhysicsCommandType::TransferRigidbody3D) {
                 if (cmd.createSlot != InvalidCreateSlotId &&
                     _createPool->take(cmd.createSlot, payload)) {
                     pPayload = &payload;

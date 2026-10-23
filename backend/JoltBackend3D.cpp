@@ -1176,6 +1176,45 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         return;
     }
 
+    case CT::TransferRigidbody3D: {
+        const uint32_t idx = handleIndex(cmd.body);
+        if (!createPayload || createPayload->kind != PhysicsCreatePayload::Kind::BodyTransfer3D
+            || idx == 0u || idx >= _impl->maxBodies
+            || _impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount; return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const auto& transfer = createPayload->bodyTransfer3D;
+        bool dynamic = false;
+        const bool found = withBody(bli, id, [&](JPH::Body& body) {
+            if (!body.IsDynamic()) return;
+            dynamic = true;
+            JPH::CollisionGroup group = body.GetCollisionGroup();
+            group.SetGroupFilter(_impl->layerMaskGroupFilter.GetPtr());
+            group.SetGroupID(static_cast<JPH::CollisionGroup::GroupID>(transfer.layer));
+            group.SetSubGroupID(static_cast<JPH::CollisionGroup::SubGroupID>(transfer.collideMask));
+            body.SetCollisionGroup(group);
+        });
+        if (!found || !dynamic) { ++_notFoundCount; return; }
+        bi.SetObjectLayer(id, toObjectLayer(transfer.layer));
+        bi.SetPositionAndRotation(id,
+            JPH::RVec3(transfer.position.x,transfer.position.y,transfer.position.z),
+            JPH::Quat(transfer.rotation.x,transfer.rotation.y,
+                      transfer.rotation.z,transfer.rotation.w),
+            JPH::EActivation::Activate);
+        bi.SetLinearVelocity(id,JPH::Vec3(transfer.linearVelocity.x,
+            transfer.linearVelocity.y,transfer.linearVelocity.z));
+        bi.SetAngularVelocity(id,JPH::Vec3(transfer.angularVelocity.x,
+            transfer.angularVelocity.y,transfer.angularVelocity.z));
+        _impl->bodyLayer[idx] = transfer.layer;
+        _impl->bodyCollideMask[idx] = transfer.collideMask;
+        _impl->desiredVelocity[idx] = {transfer.linearVelocity.x,
+            transfer.linearVelocity.y,transfer.linearVelocity.z};
+        for (auto& character : _impl->characters) if (character) character->needsRefresh = true;
+        return;
+    }
+
     case CT::ApplyAcceleration:
     case CT::ApplyForce:
     case CT::ApplyImpulse: {

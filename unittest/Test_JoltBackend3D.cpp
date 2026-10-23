@@ -712,6 +712,38 @@ TEST_SUITE(JoltBackend3DTests)
         mgr->shutdown();
     }
 
+    TEST_CASE(Real_TransferRigidbodyChangesPoseVelocityAndQueryLayerTogether) {
+        auto mgr=makeJoltMgr();
+        auto* world=mgr->world3D();
+        RigidbodyDesc desc;desc.type=BodyType::Dynamic;desc.layer=1;
+        desc.collideMask=1u<<1;desc.gravityScale=0;desc.alwaysSync=true;
+        desc.linearDamping=0;desc.angularDamping=0;
+        BodyHandle body=InvalidBodyHandle;
+        CHECK(world->createRigidbody(desc,body)==PhysResult::Ok);
+        ColliderDesc collider;collider.body=body;collider.shape=ColliderShape::Box;
+        ColliderHandle shape=InvalidColliderHandle;
+        CHECK(world->createCollider(collider,shape)==PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.f/60.f)==PhysResult::Ok);
+        CHECK(world->transferRigidbody(body,{10,2,0},{0,0,0,1},
+            {2,0,0},{0,0,1},3,1u<<3)==PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.f/60.f)==PhysResult::Ok);
+        const auto& snapshot=mgr->fetchResults();
+        bool found=false;
+        for(const auto& pose:snapshot.transforms) if(pose.body==body) {
+            found=true;
+            CHECK(pose.position.x>10);
+            CHECK_FLOAT_EQ(pose.position.y,2,1e-3f);
+            CHECK_FLOAT_EQ(pose.linearVelocity.x,2,1e-3f);
+            CHECK_FLOAT_EQ(pose.angularVelocity.z,1,1e-3f);
+        }
+        CHECK(found);
+        RaycastHit oldLayer{},newLayer{};
+        CHECK(world->raycastSync({{10,2,3},{0,0,-1}},oldLayer,1u<<1)==PhysResult::Ok);
+        CHECK(world->raycastSync({{10,2,3},{0,0,-1}},newLayer,1u<<3)==PhysResult::Ok);
+        CHECK_FALSE(oldLayer.hit);CHECK(newLayer.hit);
+        mgr->shutdown();
+    }
+
     TEST_CASE(Real_SetMassChangesAccelerationUnderForce) {
         // R10: same force, mass 4 vs 1 — 4x the acceleration after the set.
         auto mgr = makeJoltMgr();
