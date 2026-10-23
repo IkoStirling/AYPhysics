@@ -30,6 +30,15 @@ public:
     PhysResult setCharacterInput(CharacterHandle h, const CharacterController3DInput& input);
     /// Teleport feet, clear velocity/input, and refresh contacts at the next step.
     PhysResult teleportCharacter(CharacterHandle h, const ayt::math::FVector3& feet);
+    /** Queue one connected-space transition of feet, velocity, up and both
+     * collision filters. Admission rejection leaves the controller unchanged.
+     * Seeds movement input from the mapped velocity and holds the mapped up
+     * until gameplay submits destination gravity/input. */
+    PhysResult transferCharacter(CharacterHandle h,
+        const ayt::math::FVector3& feet,
+        const ayt::math::FVector3& linearVelocity,
+        const ayt::math::FVector3& up,
+        PhysLayer layer, PhysLayerMask collideMask);
     /// Copy the latest completed-step state; NotFound before creation/after removal.
     PhysResult getCharacterState(CharacterHandle h, CharacterController3DState& outState);
 
@@ -49,6 +58,10 @@ public:
         const ayt::math::FVector3& linearVelocity,
         const ayt::math::FVector3& angularVelocity,
         PhysLayer layer, PhysLayerMask collideMask);
+    /// Queue a collision-route change for an existing static, kinematic or
+    /// dynamic body. Admission is atomic; the new filter takes effect at step.
+    PhysResult setRigidbodyRoute(BodyHandle h, PhysLayer layer,
+                                PhysLayerMask collideMask);
     PhysResult    applyForce(BodyHandle h, const ayt::math::FVector3& f);
     /// Mass-independent world-space acceleration, enqueued before the physics step.
     /// Intended for spatial gravity fields; dynamic bodies only.

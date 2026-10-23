@@ -57,6 +57,8 @@ enum class PhysicsCommandType : uint8_t {
     TeleportCharacter     = 26,
     ApplyAcceleration     = 27, // mass-independent 3D force (m * acceleration)
     TransferRigidbody3D   = 28, // one queued pose/velocity/collision-route transition
+    SetRigidbodyRoute3D   = 29, // change object layer and mask together
+    TransferCharacter3D   = 30, // one queued feet/velocity/up/route transition
 };
 
 using CreateSlotId = uint32_t;
@@ -65,7 +67,7 @@ constexpr CreateSlotId InvalidCreateSlotId = 0;
 // Out-of-band create payload (§5.2). Game allocates, physics consumes + frees slot.
 struct PhysicsCreatePayload {
     enum class Kind : uint8_t { Rigidbody = 0, Collider = 1, Joint = 2, Character = 3,
-                                BodyTransfer3D = 4 } kind = Kind::Rigidbody;
+                                BodyTransfer3D = 4, CharacterTransfer3D = 5 } kind = Kind::Rigidbody;
     RigidbodyDesc rigidDesc{};
     ColliderDesc  colliderDesc{};
     JointDesc     jointDesc{};
@@ -79,6 +81,13 @@ struct PhysicsCreatePayload {
         PhysLayer layer = 0;
         PhysLayerMask collideMask = 0xFFFFFFFFu;
     } bodyTransfer3D{};
+    struct CharacterTransfer3D {
+        ayt::math::FVector3 feet{};
+        ayt::math::FVector3 linearVelocity{};
+        ayt::math::FVector3 up{0, 1, 0};
+        PhysLayer layer = 0;
+        PhysLayerMask collideMask = 0xFFFFFFFFu;
+    } characterTransfer3D{};
 };
 
 // Compact PhysicsCommand (§5.2). No descriptor copies; create uses CreateSlotId.

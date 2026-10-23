@@ -77,6 +77,16 @@ Controller snapshots are owned values and reset with the double buffer.
 Facade slots recycle after a successful FIFO destroy enqueue with per-slot
 generation bumps; stale commands cannot mutate a replacement. Controllers are
 destroyed before PhysicsSystem. See [the full contract](docs/character-controller-3d.md).
+
+**2026-10-23 connected-region routes:** `SetRigidbodyRoute3D` changes Jolt
+ObjectLayer and CollisionGroup layer/mask in one physics-thread command for any
+body motion type. `TransferCharacter3D` carries feet, linear velocity, up and
+layer/mask out of band in PhysicsCreatePool, preserving the <=64-byte command.
+The Jolt executor updates CharacterVirtual user data, up/rotation/supporting
+volume, pose, velocity and filter descriptor before contact refresh. Its new
+horizontal input starts at mapped velocity and zero gravity holds mapped up
+until gameplay submits destination input. Failed facade admission publishes no
+partial transition; this is still a teleport without portal sweep.
 > **Authority:** this file is the source of truth for AYPhysics architecture.
 > **Related:** [`ENGINE-DETERMINISM-ARCHITECTURE.md`](../../ENGINE-DETERMINISM-ARCHITECTURE.md) — Physics-A vs Physics-B dual paths.
 

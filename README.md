@@ -93,6 +93,11 @@ moving-platform support on the physics thread. See the
 [controller guide](docs/character-controller-3d.md) for acquisition, examples,
 lifecycle, failure behavior and limits. The older phase table below is historical.
 
+Connected-region adapters can also call `PhysicsWorld3D::setRigidbodyRoute`
+for an existing body's layer/mask and `transferCharacter` for one queued
+feet/velocity/up/filter transition. The latter preserves mapped momentum for
+the first destination step; see the [controller guide](docs/character-controller-3d.md).
+
 - **Authoritative design:** [`design.md`](design.md) (v0.3, 2026-07-30) — see §17 for perf / Jolt gate
 - **AI / dev rules:** [`CLAUDE.md`](CLAUDE.md)
 - **3D backend:** Jolt (locked, real impl via vcpkg `jolt-physics` 5.5.0); see design §4.1

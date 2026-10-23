@@ -179,6 +179,19 @@ PhysResult PhysicsWorld3D::transferRigidbody(BodyHandle h,
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld3D::setRigidbodyRoute(BodyHandle h, PhysLayer layer,
+                                             PhysLayerMask collideMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->isRunning() || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h) || layer >= 32) return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::SetRigidbodyRoute3D;
+    cmd.body = h;
+    cmd.queryId = layer;
+    cmd.layerMask = collideMask;
+    return m->commandQueue()->tryPush(cmd) ? PhysResult::Ok : PhysResult::QueueFull;
+}
+
 PhysResult PhysicsWorld3D::applyForce(BodyHandle h, const ayt::math::FVector3& f) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue()) return PhysResult::InvalidState;

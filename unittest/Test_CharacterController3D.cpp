@@ -41,6 +41,46 @@ TEST_CASE(DefaultJoltFallbackCannotPretendToCreateController) {
 #endif
 
 #if defined(AYPHYSICS_HAS_JOLT)
+TEST_CASE(ConnectedRegionTransferPreservesCharacterVelocityAndChangesContacts) {
+    Scene scene;
+    RigidbodyDesc nearWall;
+    nearWall.type=BodyType::Static;
+    nearWall.position={0,0,1};
+    nearWall.layer=1;nearWall.collideMask=1u<<1;
+    BodyHandle firstWall;
+    accepted(scene.world->createRigidbody(nearWall,firstWall));
+    ColliderDesc shape;shape.body=firstWall;shape.halfExtents={2,2,.1f};
+    ColliderHandle collider;
+    accepted(scene.world->createCollider(shape,collider));
+    RigidbodyDesc farWall=nearWall;
+    farWall.position={10,0,1};
+    farWall.layer=2;farWall.collideMask=1u<<2;
+    BodyHandle secondWall;
+    accepted(scene.world->createRigidbody(farWall,secondWall));
+    shape.body=secondWall;
+    accepted(scene.world->createCollider(shape,collider));
+    CharacterController3DDesc desc;
+    desc.layer=1;desc.collideMask=1u<<1;
+    const auto character=scene.character(desc);
+    CharacterController3DInput idle;
+    idle.useGravityOverride=true;
+    accepted(scene.world->setCharacterInput(character,idle));
+    scene.tick();
+    CHECK_TRUE(scene.world->transferCharacter(character,{10,0,0},{0,0,2},{0,1,0},32,4)
+               == PhysResult::InvalidParam);
+    accepted(scene.world->transferCharacter(character,{10,0,0},{0,0,2},{0,1,0},2,1u<<2));
+    scene.tick();
+    const auto state=scene.state(character);
+    CHECK_FLOAT_EQ(state.position.x,10,1e-3f);
+    CHECK_TRUE(state.position.z>0);
+    CHECK_TRUE(state.position.z<.1f);
+    CHECK_FLOAT_EQ(state.up.y,1,1e-4f);
+    idle.horizontalVelocity={0,0,3};
+    accepted(scene.world->setCharacterInput(character,idle));
+    scene.tick(30);
+    CHECK_TRUE(scene.state(character).position.z<.8f);
+    CHECK_TRUE(scene.state(character).groundBody!=firstWall);
+}
 TEST_CASE(SidewaysGravityWalkJumpAndVacuumPreservesUp) {
     Scene scene;
     const auto wall=scene.box({-.25f,0,0},{.25f,20,20});

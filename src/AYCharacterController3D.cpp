@@ -3,6 +3,7 @@
 #include <AYPhysics/IPhysicsBackend3D.h>
 #include "CharacterController3DValidation.h"
 #include <algorithm>
+#include <cmath>
 
 namespace ayt::physics {
 namespace {
@@ -101,6 +102,35 @@ PhysResult PhysicsWorld3D::teleportCharacter(CharacterHandle h, const ayt::math:
     command.character = h;
     command.u.vec4 = {feet.x, feet.y, feet.z, 0};
     return _manager->commandQueue()->tryPush(command) ? PhysResult::Ok : PhysResult::QueueFull;
+}
+
+PhysResult PhysicsWorld3D::transferCharacter(CharacterHandle h,
+    const ayt::math::FVector3& feet,
+    const ayt::math::FVector3& linearVelocity,
+    const ayt::math::FVector3& up,
+    PhysLayer layer, PhysLayerMask collideMask) {
+    const float upLengthSq = up.lengthSq();
+    if (!detail::validCharacterHandle(h) || !detail::finiteVector(feet)
+        || !detail::finiteVector(linearVelocity) || !detail::finiteVector(up)
+        || !std::isfinite(upLengthSq) || std::fabs(upLengthSq - 1.0f) > 1.0e-3f
+        || layer >= 32) return PhysResult::InvalidParam;
+    const auto ready = controllerReady(_manager);
+    if (ready != PhysResult::Ok) return ready;
+    if (!ownsCharacter(h)) return PhysResult::NotFound;
+    PhysicsCreatePayload payload{};
+    payload.kind = PhysicsCreatePayload::Kind::CharacterTransfer3D;
+    payload.characterTransfer3D = {feet, linearVelocity, up, layer, collideMask};
+    const auto slot = _manager->createPool()->allocate(payload);
+    if (!slot) return PhysResult::NoMemory;
+    PhysicsCommand command{};
+    command.type = PhysicsCommandType::TransferCharacter3D;
+    command.character = h;
+    command.createSlot = slot;
+    if (!_manager->commandQueue()->tryPush(command)) {
+        (void)_manager->createPool()->take(slot, payload);
+        return PhysResult::QueueFull;
+    }
+    return PhysResult::Ok;
 }
 
 PhysResult PhysicsWorld3D::getCharacterState(CharacterHandle h, CharacterController3DState& out) {

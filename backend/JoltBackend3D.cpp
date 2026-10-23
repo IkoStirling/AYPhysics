@@ -1046,7 +1046,8 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
     }
     case CT::DestroyCharacter:
     case CT::SetCharacterInput:
-    case CT::TeleportCharacter: {
+    case CT::TeleportCharacter:
+    case CT::TransferCharacter3D: {
         const auto index = handleIndex(cmd.character);
         if (!detail::validCharacterHandle(cmd.character) || index >= _impl->maxBodies ||
             !_impl->characters[index] || _impl->characters[index]->handle != cmd.character) {
@@ -1067,6 +1068,38 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             input.useGravityOverride = cmd.layerMask == 1u;
             if (!detail::validCharacterInput(input)) { ++_invalidParamCount; return; }
             record.input = input;
+        } else if (cmd.type == CT::TransferCharacter3D) {
+            if (!createPayload || createPayload->kind != PhysicsCreatePayload::Kind::CharacterTransfer3D) {
+                ++_invalidParamCount; return;
+            }
+            const auto& transfer = createPayload->characterTransfer3D;
+            if (transfer.layer >= 32 || !detail::finiteVector(transfer.feet)
+                || !detail::finiteVector(transfer.linearVelocity)
+                || !detail::finiteVector(transfer.up)) {
+                ++_invalidParamCount; return;
+            }
+            const JPH::Vec3 up(transfer.up.x, transfer.up.y, transfer.up.z);
+            record.desc.layer = transfer.layer;
+            record.desc.collideMask = transfer.collideMask;
+            record.desc.up = transfer.up;
+            record.controller->SetUserData((static_cast<uint64_t>(transfer.layer) << 32)
+                                           | transfer.collideMask);
+            record.controller->SetUp(up);
+            record.controller->SetRotation(JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), up));
+            record.controller->SetSupportingVolume(JPH::Plane(up, -record.desc.radius));
+            record.controller->SetPosition(JPH::RVec3(transfer.feet.x, transfer.feet.y,
+                                                        transfer.feet.z));
+            record.controller->SetLinearVelocity(JPH::Vec3(transfer.linearVelocity.x,
+                transfer.linearVelocity.y, transfer.linearVelocity.z));
+            // ExtendedUpdate derives tangent velocity from the current input.
+            // Seed that input with the mapped velocity so the first destination
+            // step does not silently discard portal momentum. Hold the mapped
+            // up in zero gravity until gameplay submits destination gravity.
+            record.input = {};
+            record.input.horizontalVelocity = transfer.linearVelocity;
+            record.input.useGravityOverride = true;
+            record.needsRefresh = true;
+            for (auto& other : _impl->characters) if (other) other->needsRefresh = true;
         } else {
             const ayt::math::FVector3 position{cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z};
             if (!detail::finiteVector(position)) { ++_invalidParamCount; return; }
@@ -1173,6 +1206,29 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             JPH::RVec3(cmd.u.xform.px, cmd.u.xform.py, cmd.u.xform.pz),
             JPH::Quat(cmd.u.xform.qx, cmd.u.xform.qy, cmd.u.xform.qz, cmd.u.xform.qw),
             JPH::EActivation::Activate);
+        return;
+    }
+
+    case CT::SetRigidbodyRoute3D: {
+        const uint32_t idx = handleIndex(cmd.body);
+        if (cmd.queryId >= 32 || idx == 0u || idx >= _impl->maxBodies
+            || _impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount; return;
+        }
+        const JPH::BodyID id = _impl->bodyIdByIndex[idx];
+        if (id.IsInvalid()) { ++_notFoundCount; return; }
+        const bool found = withBody(bli, id, [&](JPH::Body& body) {
+            JPH::CollisionGroup group = body.GetCollisionGroup();
+            group.SetGroupFilter(_impl->layerMaskGroupFilter.GetPtr());
+            group.SetGroupID(static_cast<JPH::CollisionGroup::GroupID>(cmd.queryId));
+            group.SetSubGroupID(static_cast<JPH::CollisionGroup::SubGroupID>(cmd.layerMask));
+            body.SetCollisionGroup(group);
+        });
+        if (!found) { ++_notFoundCount; return; }
+        bi.SetObjectLayer(id, toObjectLayer(static_cast<PhysLayer>(cmd.queryId)));
+        _impl->bodyLayer[idx] = static_cast<PhysLayer>(cmd.queryId);
+        _impl->bodyCollideMask[idx] = cmd.layerMask;
+        for (auto& character : _impl->characters) if (character) character->needsRefresh = true;
         return;
     }
 

@@ -54,6 +54,17 @@ only launches from walkable ground while not already moving upward. Airborne
 jumps are discarded, not queued for landing. Upward jumps are never snapped
 back to the floor. Set step/snap distances to zero to disable those behaviors.
 
+For connected regions, create through
+`EntityPhysicsBridge::createCharacterForEntity` with a shared
+`SpacePhysicsRoutes` table, then use `transferSpatialCharacterAcrossSpaces`
+with the latest completed controller state and planned displacement. The
+underlying `PhysicsWorld3D::transferCharacter` admits feet, mapped velocity,
+up, layer and mask together. Queue rejection leaves the Entity unchanged.
+After admission, the first destination step uses mapped horizontal velocity
+and zero gravity to retain the mapped up; submit the destination's movement
+and gravity policy before later steps, and continue copying completed state to
+the Entity. See [connected spaces](../../../AYDocs/CONNECTED-SPACES.md).
+
 `OnGround` permits jumping; `OnSteepGround` is a contact on an unwalkable slope,
 `NotSupported` is contact without support, and `InAir` is no support/contact.
 At a sharp descending step, a round capsule can briefly report steep edge
