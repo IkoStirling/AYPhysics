@@ -59,6 +59,7 @@ enum class PhysicsCommandType : uint8_t {
     TransferRigidbody3D   = 28, // one queued pose/velocity/collision-route transition
     SetRigidbodyRoute3D   = 29, // change object layer and mask together
     TransferCharacter3D   = 30, // one queued feet/velocity/up/route transition
+    SetCharacterStepDisplacement3D = 31, // one-shot collision-swept controller motion
 };
 
 using CreateSlotId = uint32_t;

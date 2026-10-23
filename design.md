@@ -1,5 +1,20 @@
 # AYPhysics Design
 
+**2026-10-24 one-shot 3D character displacement:** The game-thread facade
+validates a finite world-space offset (length at most 1000), then queues one
+compact command keyed by the generation-checked character handle. The latest
+command before a fixed step wins; enqueue rejection changes no controller
+state. The Jolt worker performs ordinary velocity/gravity/jump movement first,
+then, only for a nonzero offset, runs a second `CharacterVirtual::ExtendedUpdate`
+using that offset over the current fixed duration with zero extra gravity and
+floor snap. It restores the ordinary-step velocity afterward so motion does
+not become a jump or momentum on later steps. Wall/floor/ceiling contacts
+constrain the actual displacement; the next snapshot's feet position is the
+authoritative result. Teleport and connected-space transfer clear the pending
+offset. The second solver pass is a per-moving-character cost, not a global
+second physics-world update. It supports local animation root translation
+once the host rotates that delta into world space.
+
 **2026-10-23 connected-space body transfer:** `TransferRigidbody3D` carries one
 out-of-band pool payload so the SPSC ring remains at most 64 bytes per command.
 The game thread validates finite pose/velocities and a Jolt layer below 32,

@@ -15,6 +15,12 @@ current availability matrix. Use the [2D SDK contract](../../AYDocs/sdk/contract
 and [architecture audit](../../AYDocs/AYPHYSICS-ARCHITECTURE-REVIEW-20261022.md)
 for the current query surface and remaining work.
 
+The 3D capsule controller also accepts one collision-swept world-space
+displacement per fixed step through `PhysicsWorld3D::setCharacterStepDisplacement`.
+It can move along the current up direction, is consumed once without lasting
+velocity, and publishes the actual traveled feet position after the step.
+See [controller behavior and fixed-step usage](docs/character-controller-3d.md).
+
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
 The legacy 3D ray and sphere-overlap queries now reject invalid/non-finite
 geometry before mailbox submission. Sync failures clear their hit/body output;

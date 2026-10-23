@@ -35,6 +35,9 @@ if (result != PhysResult::Ok) { /* Handle unsupported backend/invalid config/cap
 
 // FixedPrePhysics: sample gameplay input. This is world-space velocity, not displacement.
 result = physics->setCharacterInput(character, {{0, 0, 3}, 0});
+// Optional root motion: rotate the animation's local delta into world space.
+// This one-shot offset can include motion along the current up direction.
+result = physics->setCharacterStepDisplacement(character, rootDeltaWorld);
 // The standard GameLoop owns the step. Embedded hosts call it themselves:
 result = manager.stepAndWait(1.0f / 60.0f);
 // FixedPostPhysics: copy the feet position to the entity/presentation transform.
@@ -53,6 +56,16 @@ velocity to stop. A positive `jumpSpeed` is consumed once at the next step; it
 only launches from walkable ground while not already moving upward. Airborne
 jumps are discarded, not queued for landing. Upward jumps are never snapped
 back to the floor. Set step/snap distances to zero to disable those behaviors.
+
+`setCharacterStepDisplacement` accepts a finite world-space offset of at most
+1000 units for the next physics step. The last queued offset before that step
+wins. Jolt applies it in a separate collision-swept controller pass after
+ordinary velocity, gravity and jump, with no floor snap in that pass; it is
+then consumed without adding lasting velocity. It may be shortened by walls,
+floors, ceilings or other controllers. Read the completed feet position to
+measure actual travel. Teleport and connected-space transfer clear a pending
+offset. This pass runs only for nonzero requested movement and costs an extra
+controller collision update; regular movement still uses `setCharacterInput`.
 
 For connected regions, create through
 `EntityPhysicsBridge::createCharacterForEntity` with a shared
@@ -96,8 +109,10 @@ it is not a swept movement and callers must choose a sensible spawn location.
   velocity is projected onto the plane orthogonal to up. See
   [spatial gravity](spatial-gravity-3d.md). It is a virtual controller, not a Rigidbody: ray/overlap queries do not return
   it as a BodyHandle, and it does not produce ordinary rigidbody contact events.
-  Entity/Scene auto-authoring, crouch and root motion are
-  outside this interface. Gameplay may copy state to Transform explicitly.
+  Entity/Scene auto-authoring and crouch are outside this interface. The
+  controller accepts root-motion displacement, while animation extraction
+  and Entity/Scene binding remain separate. Gameplay may copy state to
+  Transform explicitly.
 - Character-to-character detection is a simple serial list; very large crowds
   require a spatial index. Jolt is not a deterministic lockstep solver.
 

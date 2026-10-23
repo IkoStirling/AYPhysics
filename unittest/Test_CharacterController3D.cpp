@@ -41,6 +41,50 @@ TEST_CASE(DefaultJoltFallbackCannotPretendToCreateController) {
 #endif
 
 #if defined(AYPHYSICS_HAS_JOLT)
+TEST_CASE(OneShotStepDisplacementSweepsVerticalMotionAndDoesNotPersist) {
+    Scene scene;
+    scene.floor();
+    CharacterController3DDesc desc;
+    desc.position = {0, 2, 0};
+    desc.groundSnapDistance = 0;
+    const auto character = scene.character(desc);
+    CharacterController3DInput vacuum;
+    vacuum.useGravityOverride = true;
+    accepted(scene.world->setCharacterInput(character, vacuum));
+    scene.tick();
+    const float before = scene.state(character).position.y;
+    CHECK_TRUE(before > 1.9f);
+    accepted(scene.world->setCharacterStepDisplacement(character, {0, -5, 0}));
+    scene.tick();
+    const auto landed = scene.state(character);
+    CHECK_TRUE(landed.position.y >= -0.06f);
+    CHECK_TRUE(landed.position.y < 0.2f);
+    scene.tick();
+    CHECK_FLOAT_EQ(scene.state(character).position.y, landed.position.y, 0.06f);
+    CHECK_TRUE(scene.world->setCharacterStepDisplacement(character,
+        {std::numeric_limits<float>::quiet_NaN(), 0, 0}) == PhysResult::InvalidParam);
+}
+
+TEST_CASE(OneShotStepDisplacementReplacesPriorRequestAndClearsOnTeleport) {
+    Scene scene;
+    const auto character = scene.character();
+    CharacterController3DInput vacuum;
+    vacuum.useGravityOverride = true;
+    accepted(scene.world->setCharacterInput(character, vacuum));
+    scene.tick();
+    accepted(scene.world->setCharacterStepDisplacement(character, {3, 0, 0}));
+    accepted(scene.world->setCharacterStepDisplacement(character, {1, 0, 0}));
+    scene.tick();
+    CHECK_FLOAT_EQ(scene.state(character).position.x, 1.0f, 0.06f);
+    accepted(scene.world->setCharacterStepDisplacement(character, {4, 0, 0}));
+    accepted(scene.world->teleportCharacter(character, {0, 0, 0}));
+    scene.tick();
+    CHECK_FLOAT_EQ(scene.state(character).position.x, 0.0f, 0.06f);
+    accepted(scene.world->destroyCharacter(character));
+    CHECK_TRUE(scene.world->setCharacterStepDisplacement(character, {1, 0, 0})
+               == PhysResult::NotFound);
+}
+
 TEST_CASE(ConnectedRegionTransferPreservesCharacterVelocityAndChangesContacts) {
     Scene scene;
     RigidbodyDesc nearWall;

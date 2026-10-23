@@ -92,6 +92,24 @@ PhysResult PhysicsWorld3D::setCharacterInput(CharacterHandle h,
     return _manager->commandQueue()->tryPush(command) ? PhysResult::Ok : PhysResult::QueueFull;
 }
 
+PhysResult PhysicsWorld3D::setCharacterStepDisplacement(CharacterHandle h,
+    const ayt::math::FVector3& worldDisplacement) {
+    const double distanceSq = double(worldDisplacement.x) * worldDisplacement.x
+        + double(worldDisplacement.y) * worldDisplacement.y
+        + double(worldDisplacement.z) * worldDisplacement.z;
+    if (!detail::validCharacterHandle(h) || !detail::finiteVector(worldDisplacement)
+        || !std::isfinite(distanceSq) || distanceSq > 1.0e6)
+        return PhysResult::InvalidParam;
+    const auto ready = controllerReady(_manager);
+    if (ready != PhysResult::Ok) return ready;
+    if (!ownsCharacter(h)) return PhysResult::NotFound;
+    PhysicsCommand command{};
+    command.type = PhysicsCommandType::SetCharacterStepDisplacement3D;
+    command.character = h;
+    command.u.vec4 = {worldDisplacement.x, worldDisplacement.y, worldDisplacement.z, 0};
+    return _manager->commandQueue()->tryPush(command) ? PhysResult::Ok : PhysResult::QueueFull;
+}
+
 PhysResult PhysicsWorld3D::teleportCharacter(CharacterHandle h, const ayt::math::FVector3& feet) {
     if (!detail::validCharacterHandle(h) || !detail::finiteVector(feet)) return PhysResult::InvalidParam;
     const auto ready = controllerReady(_manager);

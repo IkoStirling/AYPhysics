@@ -28,6 +28,15 @@ public:
     /// Submit before FixedPhysics; world velocity is projected onto the current
     /// gravity tangent plane, persists, and jump is consumed once.
     PhysResult setCharacterInput(CharacterHandle h, const CharacterController3DInput& input);
+    /// Queue one world-space displacement for the next fixed step. The Jolt
+    /// controller sweeps it against current collision after ordinary movement;
+    /// the request is consumed once and adds no lasting velocity. A later
+    /// request before the same step replaces the earlier one. Use this for
+    /// animation root motion, including motion along the current up axis.
+    /// Ok acknowledges admission, not the final traveled distance: read the
+    /// completed CharacterController3DState after stepAndWait().
+    PhysResult setCharacterStepDisplacement(CharacterHandle h,
+        const ayt::math::FVector3& worldDisplacement);
     /// Teleport feet, clear velocity/input, and refresh contacts at the next step.
     PhysResult teleportCharacter(CharacterHandle h, const ayt::math::FVector3& feet);
     /** Queue one connected-space transition of feet, velocity, up and both

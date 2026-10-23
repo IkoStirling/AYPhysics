@@ -393,6 +393,7 @@ struct CharacterRecord final : JPH::CharacterContactListener {
     CharacterHandle handle = InvalidCharacterHandle;
     CharacterController3DDesc desc{};
     CharacterController3DInput input{};
+    ayt::math::FVector3 stepDisplacement{};
     JPH::Ref<JPH::CharacterVirtual> controller;
     bool needsRefresh = true;
     bool OnCharacterContactValidate(const JPH::CharacterVirtual*,
@@ -700,6 +701,21 @@ void JoltBackend3D::updateCharacters(float dt) {
         settings.mWalkStairsStepUp = up * record->desc.maxStepHeight;
         settings.mStickToFloorStepDown = -up * record->desc.groundSnapDistance;
         character.ExtendedUpdate(dt, gravity, settings, {}, layers, filter, {}, *_impl->tempAllocator);
+        const auto displacement = record->stepDisplacement;
+        record->stepDisplacement = {};
+        if (displacement.lengthSq() > 0.0f) {
+            // A separate swept pass keeps authored root translation from
+            // becoming momentum on the following fixed step. It also lets
+            // vertical motion pass through the same collision solver.
+            const JPH::Vec3 retainedVelocity = character.GetLinearVelocity();
+            character.SetLinearVelocity(JPH::Vec3(displacement.x / dt,
+                displacement.y / dt, displacement.z / dt));
+            JPH::CharacterVirtual::ExtendedUpdateSettings motionSettings = settings;
+            motionSettings.mStickToFloorStepDown = JPH::Vec3::sZero();
+            character.ExtendedUpdate(dt, JPH::Vec3::sZero(), motionSettings,
+                {}, layers, filter, {}, *_impl->tempAllocator);
+            character.SetLinearVelocity(retainedVelocity);
+        }
     }
 }
 
@@ -1047,7 +1063,8 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
     case CT::DestroyCharacter:
     case CT::SetCharacterInput:
     case CT::TeleportCharacter:
-    case CT::TransferCharacter3D: {
+    case CT::TransferCharacter3D:
+    case CT::SetCharacterStepDisplacement3D: {
         const auto index = handleIndex(cmd.character);
         if (!detail::validCharacterHandle(cmd.character) || index >= _impl->maxBodies ||
             !_impl->characters[index] || _impl->characters[index]->handle != cmd.character) {
@@ -1068,6 +1085,13 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             input.useGravityOverride = cmd.layerMask == 1u;
             if (!detail::validCharacterInput(input)) { ++_invalidParamCount; return; }
             record.input = input;
+        } else if (cmd.type == CT::SetCharacterStepDisplacement3D) {
+            const ayt::math::FVector3 displacement{cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z};
+            const double distanceSq = double(displacement.x) * displacement.x
+                + double(displacement.y) * displacement.y + double(displacement.z) * displacement.z;
+            if (!detail::finiteVector(displacement) || !std::isfinite(distanceSq)
+                || distanceSq > 1.0e6) { ++_invalidParamCount; return; }
+            record.stepDisplacement = displacement;
         } else if (cmd.type == CT::TransferCharacter3D) {
             if (!createPayload || createPayload->kind != PhysicsCreatePayload::Kind::CharacterTransfer3D) {
                 ++_invalidParamCount; return;
@@ -1096,6 +1120,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             // step does not silently discard portal momentum. Hold the mapped
             // up in zero gravity until gameplay submits destination gravity.
             record.input = {};
+            record.stepDisplacement = {};
             record.input.horizontalVelocity = transfer.linearVelocity;
             record.input.useGravityOverride = true;
             record.needsRefresh = true;
@@ -1106,6 +1131,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             record.controller->SetPosition(JPH::RVec3(position.x, position.y, position.z));
             record.controller->SetLinearVelocity(JPH::Vec3::sZero());
             record.input = {};
+            record.stepDisplacement = {};
             record.needsRefresh = true;
         }
         return;
