@@ -27,6 +27,7 @@ add_executable(${TEST_TARGET}
     # create-pool without Jolt linkage).
     Test_JoltBackend3D_AdvancedShapes.cpp
     Test_CharacterController3D.cpp
+    Test_GravityField3D.cpp
     Test_JoltColliderHits.cpp
     Test_SphereSweep.cpp
     Test_CircleSweep2D.cpp

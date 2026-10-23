@@ -665,6 +665,18 @@ void JoltBackend3D::updateCharacters(float dt) {
         auto& character = *record->controller;
         CharacterBodyFilter filter(record->desc);
         QueryLayerFilter layers(record->desc.collideMask);
+        const auto& input = record->input;
+        const JPH::Vec3 gravity = input.useGravityOverride
+            ? JPH::Vec3(input.gravity.x, input.gravity.y, input.gravity.z)
+            : JPH::Vec3(_gravity.x, _gravity.y, _gravity.z) * record->desc.gravityScale;
+        JPH::Vec3 up = character.GetUp();
+        if (gravity.LengthSq() > 1.0e-10f) up = -gravity.Normalized();
+        if ((up - character.GetUp()).LengthSq() > 1.0e-8f) {
+            character.SetUp(up);
+            character.SetRotation(JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), up));
+            character.SetSupportingVolume(JPH::Plane(up, -record->desc.radius));
+            record->needsRefresh = true;
+        }
         if (record->needsRefresh) {
             character.RefreshContacts({}, layers, filter, {}, *_impl->tempAllocator);
             record->needsRefresh = false;
@@ -672,21 +684,21 @@ void JoltBackend3D::updateCharacters(float dt) {
         character.UpdateGroundVelocity();
         const auto groundVelocity = character.GetGroundVelocity();
         const auto oldVelocity = character.GetLinearVelocity();
-        JPH::Vec3 velocity(record->input.horizontalVelocity.x, oldVelocity.GetY(),
-                           record->input.horizontalVelocity.z);
+        const JPH::Vec3 requested(input.horizontalVelocity.x,
+                                  input.horizontalVelocity.y,
+                                  input.horizontalVelocity.z);
+        const JPH::Vec3 tangent = requested - up * requested.Dot(up);
+        JPH::Vec3 velocity = tangent + up * oldVelocity.Dot(up);
         if (character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround &&
-            oldVelocity.GetY() - groundVelocity.GetY() <= 0.1f) {
-            velocity = JPH::Vec3(record->input.horizontalVelocity.x, 0,
-                                 record->input.horizontalVelocity.z) + groundVelocity;
-            velocity += JPH::Vec3(0, record->input.jumpSpeed, 0);
+            (oldVelocity - groundVelocity).Dot(up) <= 0.1f) {
+            velocity = tangent + groundVelocity + up * input.jumpSpeed;
         }
         record->input.jumpSpeed = 0; // Never repeats on landing or airborne input.
-        const JPH::Vec3 gravity(0, _gravity.y * record->desc.gravityScale, 0);
         velocity += gravity * dt;
         character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(velocity));
         JPH::CharacterVirtual::ExtendedUpdateSettings settings;
-        settings.mWalkStairsStepUp = JPH::Vec3(0, record->desc.maxStepHeight, 0);
-        settings.mStickToFloorStepDown = JPH::Vec3(0, -record->desc.groundSnapDistance, 0);
+        settings.mWalkStairsStepUp = up * record->desc.maxStepHeight;
+        settings.mStickToFloorStepDown = -up * record->desc.groundSnapDistance;
         character.ExtendedUpdate(dt, gravity, settings, {}, layers, filter, {}, *_impl->tempAllocator);
     }
 }
@@ -827,6 +839,8 @@ void JoltBackend3D::publishSnapshot(PhysFrameSnapshot& outSnapshot) {
                            static_cast<float>(position.GetZ())};
         state.linearVelocity = {velocity.GetX(), velocity.GetY(), velocity.GetZ()};
         state.groundNormal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+        const auto up = character.GetUp();
+        state.up = {up.GetX(), up.GetY(), up.GetZ()};
         state.groundVelocity = {groundVelocity.GetX(), groundVelocity.GetY(), groundVelocity.GetZ()};
         switch (character.GetGroundState()) {
         case JPH::CharacterBase::EGroundState::OnGround: state.groundState = CharacterGroundState3D::OnGround; break;
@@ -1013,13 +1027,16 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         record->desc = desc;
         JPH::CharacterVirtualSettings settings;
         settings.mShape = shape.Get();
+        const JPH::Vec3 initialUp = JPH::Vec3(desc.up.x, desc.up.y, desc.up.z).Normalized();
+        settings.mUp = initialUp;
         settings.mMaxSlopeAngle = JPH::DegreesToRadians(desc.maxSlopeDegrees);
-        settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -desc.radius);
+        settings.mSupportingVolume = JPH::Plane(initialUp, -desc.radius);
         settings.mMass = desc.mass;
         settings.mMaxStrength = desc.maxPushStrength;
         settings.mEnhancedInternalEdgeRemoval = true;
         record->controller = new JPH::CharacterVirtual(&settings,
-            JPH::RVec3(desc.position.x, desc.position.y, desc.position.z), JPH::Quat::sIdentity(),
+            JPH::RVec3(desc.position.x, desc.position.y, desc.position.z),
+            JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), initialUp),
             (static_cast<uint64_t>(desc.layer) << 32) | desc.collideMask, _impl->physicsSystem.get());
         record->controller->SetListener(record.get());
         record->controller->SetCharacterVsCharacterCollision(&_impl->characterCollision);
@@ -1041,7 +1058,13 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
             _impl->characters[index].reset();
             for (auto& other : _impl->characters) if (other) other->needsRefresh = true;
         } else if (cmd.type == CT::SetCharacterInput) {
-            CharacterController3DInput input{{cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z}, cmd.u.vec4.w};
+            CharacterController3DInput input;
+            input.horizontalVelocity = {cmd.u.characterInput.vx,
+                cmd.u.characterInput.vy, cmd.u.characterInput.vz};
+            input.jumpSpeed = cmd.u.characterInput.jump;
+            input.gravity = {cmd.u.characterInput.gx,
+                cmd.u.characterInput.gy, cmd.u.characterInput.gz};
+            input.useGravityOverride = cmd.layerMask == 1u;
             if (!detail::validCharacterInput(input)) { ++_invalidParamCount; return; }
             record.input = input;
         } else {
@@ -1153,6 +1176,7 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         return;
     }
 
+    case CT::ApplyAcceleration:
     case CT::ApplyForce:
     case CT::ApplyImpulse: {
         const uint32_t idx = handleIndex(cmd.body);
@@ -1160,8 +1184,18 @@ void JoltBackend3D::execute(const PhysicsCommand& cmd,
         if (_impl->bodyGeneration[idx] != handleGeneration(cmd.body)) { ++_notFoundCount; return; }
         const JPH::BodyID id = _impl->bodyIdByIndex[idx];
         if (id.IsInvalid()) return;
-        if (cmd.type == CT::ApplyForce) {
-            bi.AddForce(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z),
+        if (cmd.type == CT::ApplyForce || cmd.type == CT::ApplyAcceleration) {
+            float mass = 1.0f;
+            if (cmd.type == CT::ApplyAcceleration) {
+                const bool dynamic = withBody(bli, id, [&](JPH::Body& body) {
+                    if (!body.IsDynamic()) { mass = 0.0f; return; }
+                    const float inverse = body.GetMotionProperties()->GetInverseMass();
+                    mass = inverse > 0.0f ? 1.0f/inverse : 0.0f;
+                });
+                if (!dynamic || mass <= 0.0f || !std::isfinite(mass)) return;
+            }
+            bi.AddForce(id, JPH::Vec3(cmd.u.vec4.x*mass,
+                        cmd.u.vec4.y*mass, cmd.u.vec4.z*mass),
                         JPH::EActivation::Activate);
         } else {
             bi.AddImpulse(id, JPH::Vec3(cmd.u.vec4.x, cmd.u.vec4.y, cmd.u.vec4.z));

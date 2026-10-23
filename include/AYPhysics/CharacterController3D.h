@@ -5,7 +5,7 @@
 
 namespace ayt::physics {
 
-/** Configuration for a Y-up capsule controller. Position is the capsule's feet.
+/** Configuration for an arbitrary-up capsule controller. Position is its feet.
  * Create through PhysicsManager::world3D()->createCharacter(), never a backend.
  * Dimensions are world units, slope is degrees. The physics thread owns the
  * solver; this descriptor contains no Jolt types or borrowed resources. */
@@ -21,14 +21,18 @@ struct CharacterController3DDesc {
     float maxPushStrength = 100.0f;
     uint16_t layer = 2; // PhysDefaultLayer::Character
     uint32_t collideMask = 0xFFFFFFFFu;
+    ayt::math::FVector3 up{0.0f, 1.0f, 0.0f}; // initial orientation; normalized on creation
 };
 
-/** World-space XZ velocity, in units/second (Y must be zero).
- * Velocity persists until replaced. jumpSpeed is a one-shot upward speed,
+/** World-space desired tangent velocity, in units/second. Its component along
+ * the current up direction is removed. jumpSpeed is a one-shot upward speed,
  * consumed at the next step and accepted only on walkable ground. */
 struct CharacterController3DInput {
     ayt::math::FVector3 horizontalVelocity{};
     float jumpSpeed = 0.0f;
+    /// Overrides world gravity for this character. Zero retains the last up.
+    ayt::math::FVector3 gravity{};
+    bool useGravityOverride = false;
 };
 
 enum class CharacterGroundState3D : uint8_t {
@@ -44,6 +48,7 @@ struct CharacterController3DState {
     ayt::math::FVector3 linearVelocity{};
     CharacterGroundState3D groundState = CharacterGroundState3D::InAir;
     ayt::math::FVector3 groundNormal{};
+    ayt::math::FVector3 up{0.0f, 1.0f, 0.0f};
     ayt::math::FVector3 groundVelocity{};
     BodyHandle groundBody = InvalidBodyHandle;
     ColliderHandle groundCollider = InvalidColliderHandle;

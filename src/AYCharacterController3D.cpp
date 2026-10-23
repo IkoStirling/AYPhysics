@@ -84,7 +84,10 @@ PhysResult PhysicsWorld3D::setCharacterInput(CharacterHandle h,
     PhysicsCommand command{};
     command.type = PhysicsCommandType::SetCharacterInput;
     command.character = h;
-    command.u.vec4 = {input.horizontalVelocity.x, 0, input.horizontalVelocity.z, input.jumpSpeed};
+    command.u.characterInput = {input.horizontalVelocity.x,
+        input.horizontalVelocity.y, input.horizontalVelocity.z, input.jumpSpeed,
+        input.gravity.x, input.gravity.y, input.gravity.z, 0.0f};
+    command.layerMask = input.useGravityOverride ? 1u : 0u;
     return _manager->commandQueue()->tryPush(command) ? PhysResult::Ok : PhysResult::QueueFull;
 }
 

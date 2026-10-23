@@ -10,7 +10,7 @@ host, resolve `PhysicsSubSystem::findRegistered()`, check `manager()` and
 `PhysicsManager` directly. All facade calls run on the game thread. Only the
 physics thread accesses Jolt.
 
-`CharacterController3DDesc` describes an upright capsule; `position` is its feet,
+`CharacterController3DDesc` describes a capsule aligned to `up`; `position` is its feet,
 `height` includes the spherical caps, and `maxSlopeDegrees` uses degrees. The
 controller supports planar movement, wall sliding, walkable/steep slope
 classification, configurable stairs and ground snapping, gravity, one-shot
@@ -72,16 +72,20 @@ it is not a swept movement and callers must choose a sensible spawn location.
   returns `NotFound`; old handles cannot affect a reused slot. Queue/pool
   exhaustion leaves no live handle and reports `QueueFull`/`NoMemory`.
 - Invalid/nonfinite dimensions, slope outside `[0,90)`, negative step/snap/jump,
-  nonzero input Y, or layer >= 32 report `InvalidParam`. Null/Mock/Jolt-off
+  zero/nonfinite initial up, nonfinite input velocity/gravity, or layer >= 32
+  report `InvalidParam`. Null/Mock/Jolt-off
   creation reports `Unsupported`; a stopped manager reports `InvalidState`.
 - Handles are manager-local. Do not transfer them between managers or keep
   borrowed facade pointers after destruction. Destroy controllers on World
   removal; a manager may outlive several Worlds. Read snapshots after the fixed
   barrier; asynchronous overlapping simulation/read is not this contract.
-- This first version uses Y-up upright capsules and the world's Y gravity.
-  It is a virtual controller, not a Rigidbody: ray/overlap queries do not return
+- Default configuration uses Y-up and world gravity. `useGravityOverride`
+  supplies a world-space acceleration per character; nonzero gravity turns
+  the capsule toward opposite up, while zero gravity keeps the last up. Desired
+  velocity is projected onto the plane orthogonal to up. See
+  [spatial gravity](spatial-gravity-3d.md). It is a virtual controller, not a Rigidbody: ray/overlap queries do not return
   it as a BodyHandle, and it does not produce ordinary rigidbody contact events.
-  Entity/Scene auto-authoring, crouch, arbitrary-up gravity and root motion are
+  Entity/Scene auto-authoring, crouch and root motion are
   outside this interface. Gameplay may copy state to Transform explicitly.
 - Character-to-character detection is a simple serial list; very large crowds
   require a spatial index. Jolt is not a deterministic lockstep solver.

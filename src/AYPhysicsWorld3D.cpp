@@ -161,6 +161,20 @@ PhysResult PhysicsWorld3D::applyForce(BodyHandle h, const ayt::math::FVector3& f
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld3D::applyAcceleration(
+    BodyHandle h, const ayt::math::FVector3& acceleration) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->commandQueue()) return PhysResult::InvalidState;
+    if (!isValidHandle(h) || !std::isfinite(acceleration.x)
+        || !std::isfinite(acceleration.y) || !std::isfinite(acceleration.z))
+        return PhysResult::InvalidParam;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::ApplyAcceleration;
+    cmd.body = h;
+    cmd.u.vec4 = {acceleration.x, acceleration.y, acceleration.z, 0.0f};
+    return m->commandQueue()->tryPush(cmd) ? PhysResult::Ok : PhysResult::QueueFull;
+}
+
 PhysResult PhysicsWorld3D::applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse,
                                         const ayt::math::FVector3& point) {
     PhysicsManager* m = _manager;

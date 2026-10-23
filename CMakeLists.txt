@@ -16,6 +16,8 @@ set(SRC_FILES
     src/AYPhysicsCommandQueue.cpp
     src/AYPhysicsManager.cpp
     src/AYPhysicsWorld3D.cpp
+    src/AYGravityField3D.cpp
+    src/AYFlightControl3D.cpp
     src/AYCharacterController3D.cpp
     src/AYPhysicsWorld2D.cpp
     src/AYPhysicsSubSystem.cpp
@@ -36,6 +38,8 @@ set(HEAD_FILES
     include/AYPhysics/PhysicsCommandQueue.h
     include/AYPhysics/PhysicsManager.h
     include/AYPhysics/PhysicsWorld3D.h
+    include/AYPhysics/GravityField3D.h
+    include/AYPhysics/FlightControl3D.h
     include/AYPhysics/PhysicsWorld2D.h
     include/AYPhysics/PhysicsSubSystem.h
     include/AYPhysics/PhysicsRuntimeModule.h
@@ -197,5 +201,13 @@ endif()
 
 enable_testing()
 add_subdirectory(unittest)
+
+if(AYPHYSICS_BUILD_JOLT)
+    add_executable(AYPhysics_ZeroGravityFlightExample examples/zero-gravity-flight/main.cpp)
+    target_link_libraries(AYPhysics_ZeroGravityFlightExample PRIVATE AYPhysics)
+    target_compile_features(AYPhysics_ZeroGravityFlightExample PRIVATE cxx_std_20)
+    add_test(NAME AYPhysics_ZeroGravityFlightExample
+        COMMAND AYPhysics_ZeroGravityFlightExample)
+endif()
 
 message(STATUS "AYPhysics v0.4.0 (Jolt 3D + Box2D 2D + R1.5c Bench_PhysicsStep §17.8 gate) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

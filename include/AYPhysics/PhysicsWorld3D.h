@@ -25,7 +25,8 @@ public:
     /// Enqueue removal and immediately invalidate the game handle. Native removal
     /// and snapshot cleanup complete at the next step; reuse bumps slot generation.
     PhysResult destroyCharacter(CharacterHandle h);
-    /// Submit before FixedPhysics; planar velocity persists, jump is consumed once.
+    /// Submit before FixedPhysics; world velocity is projected onto the current
+    /// gravity tangent plane, persists, and jump is consumed once.
     PhysResult setCharacterInput(CharacterHandle h, const CharacterController3DInput& input);
     /// Teleport feet, clear velocity/input, and refresh contacts at the next step.
     PhysResult teleportCharacter(CharacterHandle h, const ayt::math::FVector3& feet);
@@ -39,6 +40,9 @@ public:
     PhysResult    destroyRigidbody(BodyHandle h);
     PhysResult    setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p, const ayt::math::FQuaternion& r);
     PhysResult    applyForce(BodyHandle h, const ayt::math::FVector3& f);
+    /// Mass-independent world-space acceleration, enqueued before the physics step.
+    /// Intended for spatial gravity fields; dynamic bodies only.
+    PhysResult    applyAcceleration(BodyHandle h, const ayt::math::FVector3& acceleration);
     PhysResult    applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse, const ayt::math::FVector3& point);
 
     // R9: runtime toggle of a body's collide mask (symmetric with PhysicsWorld2D).

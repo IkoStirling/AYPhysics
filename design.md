@@ -1,5 +1,17 @@
 # AYPhysics Design
 
+**2026-10-23 spatial gravity extension:** Game-thread `GravityField3D` owns at
+most 64 validated sources, ordered by priority then stable ID. Sampling is
+side-effect free; fixed-step callers dispatch acceleration using previous
+completed body poses. The Jolt command converts acceleration to force using
+current dynamic mass and skips non-dynamic bodies. Set global gravity to zero
+for heterogeneous fields. Character commands carry a gravity override and
+world tangent velocity; Jolt updates capsule orientation, support plane,
+steps/snap and jump against `up=-gravity.normalized()`. Zero gravity retains
+the last up. Six-axis flight only maps input to a world wrench; caller owns
+input policy. See [the integration guide](docs/spatial-gravity-3d.md) and the
+runnable flight example. This remains Jolt float simulation, outside lockstep.
+
 > **Status:** v0.5 (2026-07-31) — R1 + R1.5a + R1.5b + R1.5c shipped; R2.0a (ConvexHull + TriangleMesh + Heightfield shapes) next
 > **Backend:** Jolt 3D (locked, real impl via vcpkg `jolt-physics` 5.5.0) + Box2D 2D (locked, R2.5 parallel)
 

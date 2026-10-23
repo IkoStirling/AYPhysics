@@ -27,6 +27,8 @@ TEST_CASE(UnsupportedBackendAndInvalidDescriptorsFailExplicitly) {
     CHECK_TRUE(manager->world3D()->createCharacter(desc,handle) == PhysResult::InvalidParam);
     desc = {}; desc.groundSnapDistance = std::numeric_limits<float>::infinity();
     CHECK_TRUE(manager->world3D()->createCharacter(desc,handle) == PhysResult::InvalidParam);
+    desc = {}; desc.up = {0,0,0};
+    CHECK_TRUE(manager->world3D()->createCharacter(desc,handle) == PhysResult::InvalidParam);
 }
 #if !defined(AYPHYSICS_HAS_JOLT)
 TEST_CASE(DefaultJoltFallbackCannotPretendToCreateController) {
@@ -39,6 +41,36 @@ TEST_CASE(DefaultJoltFallbackCannotPretendToCreateController) {
 #endif
 
 #if defined(AYPHYSICS_HAS_JOLT)
+TEST_CASE(SidewaysGravityWalkJumpAndVacuumPreservesUp) {
+    Scene scene;
+    const auto wall=scene.box({-.25f,0,0},{.25f,20,20});
+    CharacterController3DDesc desc;
+    desc.up={1,0,0}; desc.position={0,0,0};
+    const auto character=scene.character(desc);
+    CharacterController3DInput input;
+    input.gravity={-9.81f,0,0}; input.useGravityOverride=true;
+    accepted(scene.world->setCharacterInput(character,input));
+    scene.tick(8);
+    auto state=scene.state(character);
+    CHECK_TRUE(state.isGrounded());
+    CHECK_INT_EQ(state.groundBody,wall);
+    CHECK_FLOAT_EQ(state.up.x,1,1e-4f);
+    input.horizontalVelocity={0,0,2};
+    accepted(scene.world->setCharacterInput(character,input));
+    scene.tick(30);
+    state=scene.state(character);
+    CHECK_TRUE(state.position.z>.7f);
+    CHECK_TRUE(state.isGrounded());
+    input.horizontalVelocity={}; input.jumpSpeed=5;
+    accepted(scene.world->setCharacterInput(character,input));
+    scene.tick(8);
+    state=scene.state(character);
+    CHECK_TRUE(state.position.x>.25f);
+    input.jumpSpeed=0; input.gravity={};
+    accepted(scene.world->setCharacterInput(character,input));
+    scene.tick(2);
+    CHECK_FLOAT_EQ(scene.state(character).up.x,1,1e-4f);
+}
 TEST_CASE(WalkStopAndExactGroundIdentity) {
     Scene scene;
     ColliderHandle groundCollider;
@@ -221,7 +253,12 @@ TEST_CASE(InvalidInputNeverReachesSolverAndCapacityIsBounded) {
     scene.floor();
     const auto character = scene.character();
     scene.tick(3);
-    CHECK_TRUE(scene.world->setCharacterInput(character,{{1,2,0},0}) == PhysResult::InvalidParam);
+    CHECK_TRUE(scene.world->setCharacterInput(character,
+        {{1,std::numeric_limits<float>::quiet_NaN(),0},0}) == PhysResult::InvalidParam);
+    CharacterController3DInput invalidGravity;
+    invalidGravity.useGravityOverride=true;
+    invalidGravity.gravity.x=std::numeric_limits<float>::infinity();
+    CHECK_TRUE(scene.world->setCharacterInput(character,invalidGravity) == PhysResult::InvalidParam);
     CHECK_TRUE(scene.world->setCharacterInput(character,{{0,0,0},-1}) == PhysResult::InvalidParam);
     CHECK_TRUE(scene.world->teleportCharacter(character,{0,std::numeric_limits<float>::infinity(),0}) == PhysResult::InvalidParam);
     CHECK_TRUE(scene.world->destroyCharacter(1) == PhysResult::InvalidParam);

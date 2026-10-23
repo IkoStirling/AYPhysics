@@ -76,6 +76,14 @@ Jolt now preserves multiple colliders as a compound, removes their geometry on
 destruction, honors ray layer masks and returns real surface normals. Body-only
 overlaps do not identify an individual shape.
 
+**2026-10-23 spatial gravity:** `GravityField3D` samples prioritized uniform,
+box and radial sources; `submitGravity3D` queues mass-independent acceleration
+for selected dynamic bodies. `FlightControl3D` supplies local six-axis
+thrust/torque and a runnable zero-gravity flight example. The Jolt capsule
+controller accepts per-character gravity and world-space tangent movement,
+then publishes its current up direction. See the
+[spatial gravity guide](docs/spatial-gravity-3d.md).
+
 **2026-10-03 current addition:** the formal `PhysicsWorld3D` controller API owns
 upright capsule movement, slopes, stairs, ground snapping, one-shot jumps and
 moving-platform support on the physics thread. See the
