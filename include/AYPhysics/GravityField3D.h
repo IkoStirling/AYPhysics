@@ -24,6 +24,7 @@ struct GravitySource3D {
     float radius = 1.0f;
     float acceleration = 9.81f;
     bool linearFalloff = false;
+    uint32_t channelMask = 0xffffffffu;
 };
 
 struct GravitySample3D {
@@ -39,7 +40,9 @@ class GravityField3D {
 public:
     [[nodiscard]] bool replace(std::vector<GravitySource3D> sources,
                                std::string* error = nullptr);
-    [[nodiscard]] GravitySample3D sample(const ayt::math::FVector3& position) const noexcept;
+    /// Only sources sharing a bit with receiverChannels are considered.
+    [[nodiscard]] GravitySample3D sample(const ayt::math::FVector3& position,
+                                         uint32_t receiverChannels = 0xffffffffu) const noexcept;
     [[nodiscard]] size_t size() const noexcept { return sources_.size(); }
 private:
     std::vector<GravitySource3D> sources_;
@@ -48,6 +51,7 @@ private:
 struct GravityBodySample3D {
     BodyHandle body = InvalidBodyHandle;
     ayt::math::FVector3 position{}; // previous completed physics snapshot
+    uint32_t receiverChannels = 0xffffffffu;
 };
 
 struct GravityDispatch3D {

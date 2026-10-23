@@ -54,11 +54,12 @@ bool GravityField3D::replace(std::vector<GravitySource3D> sources,
 }
 
 GravitySample3D GravityField3D::sample(
-    const ayt::math::FVector3& position) const noexcept {
+    const ayt::math::FVector3& position, uint32_t receiverChannels) const noexcept {
     GravitySample3D result;
     if (!finite(position)) return result;
     int32_t priority = 0;
     for (const auto& source : sources_) {
+        if ((source.channelMask & receiverChannels) == 0) continue;
         if (result.active && source.priority < priority) break;
         ayt::math::FVector3 acceleration{};
         if (source.shape == GravityShape3D::Uniform) {
@@ -96,7 +97,7 @@ GravityDispatch3D submitGravity3D(
             dispatch.result = PhysResult::InvalidParam;
             break;
         }
-        const auto gravity = field.sample(body.position).acceleration;
+        const auto gravity = field.sample(body.position, body.receiverChannels).acceleration;
         if (gravity.x == 0 && gravity.y == 0 && gravity.z == 0) continue;
         dispatch.result = world.applyAcceleration(body.body, gravity);
         if (dispatch.result != PhysResult::Ok) break;

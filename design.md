@@ -1550,3 +1550,12 @@ result cap (default 64). Results sort by body then collider. A valid empty
 allocation failure returns `NoMemory`, and Null 2D returns `Unsupported`.
 Debug history draws the query outline and records hit status; no contact
 point, normal or penetration depth is inferred from an overlap callback.
+
+## Spatial gravity channels (2026-10-23)
+
+`GravitySource3D::channelMask` and the optional receiver mask on `sample`
+and `GravityBodySample3D` filter nonintersecting sources before priority
+selection. Default all-bit masks preserve previous direct callers. Sources
+remain game-thread catalog values; AYEntity's Spatial authoring owns automatic
+fixed-step collection, not AYPhysics. The 64-source cap and axis-aligned Box
+contract are unchanged.

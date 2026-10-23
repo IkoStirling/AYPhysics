@@ -37,6 +37,21 @@ TEST_CASE(RadialFalloffAndAtomicValidation) {
     CHECK_INT_EQ(field.size(),1u);
     CHECK_FLOAT_EQ(field.sample({5,0,0}).acceleration.x,-10,1e-4f);
 }
+TEST_CASE(SourceChannelsFilterBeforePrioritySelection) {
+    GravityField3D field;
+    GravitySource3D player; player.id=1; player.priority=10;
+    player.channelMask=1; player.direction={1,0,0};
+    GravitySource3D props; props.id=2; props.priority=1;
+    props.channelMask=2; props.direction={0,-1,0};
+    CHECK_TRUE(field.replace({player,props}));
+    const auto a=field.sample({0,0,0},1);
+    const auto b=field.sample({0,0,0},2);
+    CHECK_FLOAT_EQ(a.acceleration.x,9.81f,1e-4f);
+    CHECK_FLOAT_EQ(a.acceleration.y,0,1e-4f);
+    CHECK_FLOAT_EQ(b.acceleration.x,0,1e-4f);
+    CHECK_FLOAT_EQ(b.acceleration.y,-9.81f,1e-4f);
+    CHECK_FALSE(field.sample({0,0,0},4).active);
+}
 TEST_CASE(FlightWrenchRotatesAllSixAxesAndRejectsInvalidInput) {
     FlightWrench3D result;
     FlightInput3D input; input.translation={1,0,0}; input.rotation={0,0,1};

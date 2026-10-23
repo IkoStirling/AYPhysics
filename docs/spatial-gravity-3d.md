@@ -7,6 +7,9 @@ acceleration. `GravityField3D::replace` validates the complete source list and
 keeps the old catalog on failure. Sources are uniform, axis-aligned box, or
 radial within a finite radius. The highest overlapping priority wins; sources
 at that priority add in ID order. Outside coverage acceleration is zero.
+Sources carry a 32-bit channel mask; `sample(position, receiverChannels)`
+ignores sources without a shared bit before priority selection. The default
+mask keeps existing all-source behavior.
 
 ```cpp
 GravityField3D field;
@@ -57,3 +60,9 @@ CPU 3D particle simulations can share the catalog through
 `ParticleInstance::update`. The query is borrowed and must stay alive for each
 update. Spatial sampling is CPU only; scene integration reports CPU fallback
 while the query is set. Particle simulation remains visual presentation time.
+
+For Scene-authored 3D rigid bodies, Spatial Entity has intrinsic gravity
+settings. Entity.PhysicsIntegration samples enabled Spatial sources and Field
+receivers before each fixed step. The direct `GravityField3D` path above
+remains available for bodies managed outside AYEntity. See AYEntity's design
+for the built-in authoring modes and legacy rigidbody scale interaction.
