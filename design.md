@@ -55,6 +55,11 @@ Legacy overlaps return unique bodies; the newer 2D capsule and oriented-box
 collider overlaps return exact body/collider pairs. Empty 3D bodies use
 `EmptyShape`; collider shapes are retained by live colliders/native bodies,
 not a destruction-time cache.
+The synchronous 3D oriented-box overlap reuses the Jolt shape query already
+used by async overlap. It validates center, positive half-extents and nonzero
+finite rotation before the mailbox, returns body handles only, and clears
+output for errors or an empty result. The Host facade returns `Unsupported`
+for backends that do not implement it.
 
 **2D legacy sync query contract (2026-10-22):** `raycastSync`,
 `overlapSphereSync` and `overlapBoxSync` clear caller output before validating

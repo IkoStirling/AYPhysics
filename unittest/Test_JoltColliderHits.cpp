@@ -27,6 +27,26 @@ TEST_CASE(RaycastCanIgnoreExactlyOneBody) {
     CHECK_TRUE(query.raycastSyncIgnoringBody(ray,hit,1u,observer)==PhysResult::InvalidParam);
     CHECK_FALSE(hit.hit);
 }
+TEST_CASE(SynchronousOrientedBoxOverlapUsesActualFootprint) {
+    Scene scene;
+    const auto nearby = scene.box({0,1.2f,0},{0.2f,0.2f,0.2f});
+    scene.tick();
+    PhysicsQueryAdapter query; query.bind(scene.manager.get());
+    std::vector<BodyHandle> bodies{nearby};
+    const ayt::math::FQuaternion identity{0,0,0,1};
+    accepted(query.overlapBoxSync({0,0,0},{2,0.2f,0.2f},identity,bodies,1u));
+    CHECK_TRUE(bodies.empty());
+    const auto rotated = ayt::math::FQuaternion::fromAxisAngle(
+        {0,0,1}, 1.5707963268f);
+    accepted(query.overlapBoxSync({0,0,0},{2,0.2f,0.2f},rotated,bodies,1u));
+    CHECK_TRUE(std::find(bodies.begin(), bodies.end(), nearby) != bodies.end());
+    accepted(query.overlapBoxSync({0,0,0},{2,0.2f,0.2f},rotated,bodies,0u));
+    CHECK_TRUE(bodies.empty());
+    bodies.push_back(nearby);
+    CHECK_TRUE(query.overlapBoxSync({0,0,0},{0,0.2f,0.2f},identity,bodies,1u)
+        == PhysResult::InvalidParam);
+    CHECK_TRUE(bodies.empty());
+}
 TEST_CASE(DebugDrawingTracksRealHitsMissesAndLayerFilters) {
     Scene scene;
     scene.box({0,0,3},{0.5f,0.5f,0.5f});

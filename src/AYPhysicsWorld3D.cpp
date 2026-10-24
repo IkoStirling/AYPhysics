@@ -567,6 +567,35 @@ PhysResult PhysicsWorld3D::overlapSphereSync(const ayt::math::FVector3& center, 
     return resp.status;
 }
 
+PhysResult PhysicsWorld3D::overlapBoxSync(const ayt::math::FVector3& center,
+    const ayt::math::FVector3& halfExtents, const ayt::math::FQuaternion& rotation,
+    std::vector<BodyHandle>& out, PhysLayerMask layerMask) {
+    out.clear();
+    if (!validBox(center, halfExtents, rotation)) return PhysResult::InvalidParam;
+    PhysicsManager* m = _manager;
+    if (!m || !m->isRunning() || !m->syncMailbox()) return PhysResult::InvalidState;
+    PhysicsDebugQuery debug; debug.type = SyncQueryType::OverlapBox;
+    debug.dimension = PhysicsDimension::ThreeD;
+    debug.center = center; debug.halfExtents = halfExtents;
+    debug.rotation = rotation;
+    SyncQueryRequest req{};
+    req.type = SyncQueryType::OverlapBox;
+    req.requestId = nextQueryId();
+    req.layerMask = layerMask;
+    req.boxCenter = center;
+    req.boxHalfExtents = halfExtents;
+    req.boxRotation = rotation;
+    debug.queryId = req.requestId; debug.layerMask = layerMask;
+    SyncQueryResponse resp{};
+    if (!m->syncMailbox()->submitAndWait(req, resp, 1000 * 1000)) {
+        (void)m->debugDraw().record(debug, PhysResult::BackendError, false);
+        return PhysResult::BackendError;
+    }
+    if (resp.status == PhysResult::Ok) out = std::move(resp.overlaps);
+    (void)m->debugDraw().record(debug, resp.status, !out.empty(), nullptr, &out);
+    return resp.status;
+}
+
 void PhysicsWorld3D::wakeAll() {
     PhysicsManager* m = _manager;
     if (!m) return;

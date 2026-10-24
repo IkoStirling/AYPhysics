@@ -48,4 +48,15 @@ PhysResult PhysicsQueryAdapter::overlapSphereSync(const ayt::math::FVector3& cen
     return _manager->world3D()->overlapSphereSync(center, radius, out, layerMask);
 }
 
+PhysResult PhysicsQueryAdapter::overlapBoxSync(const ayt::math::FVector3& center,
+    const ayt::math::FVector3& halfExtents,
+    const ayt::math::FQuaternion& rotation,
+    std::vector<BodyHandle>& out, PhysLayerMask layerMask)
+{
+    out.clear();
+    if (!isReady()) return PhysResult::InvalidState;
+    return _manager->world3D()->overlapBoxSync(center, halfExtents, rotation,
+                                                out, layerMask);
+}
+
 } // namespace ayt::physics

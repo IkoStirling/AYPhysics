@@ -53,6 +53,17 @@ public:
                                          float radius,
                                          std::vector<BodyHandle>& out,
                                          PhysLayerMask layerMask = 0xFFFFFFFFu) = 0;
+
+    /// Current-world oriented 3D box overlap. Returns body handles only.
+    /// Failure and a successful empty result clear out. Backends without this
+    /// query return Unsupported so callers can reject placement safely.
+    virtual PhysResult overlapBoxSync(const ayt::math::FVector3&,
+                                      const ayt::math::FVector3&,
+                                      const ayt::math::FQuaternion&,
+                                      std::vector<BodyHandle>& out,
+                                      PhysLayerMask = 0xFFFFFFFFu) {
+        out.clear(); return PhysResult::Unsupported;
+    }
 };
 
 } // namespace ayt::physics

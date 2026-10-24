@@ -128,6 +128,14 @@ public:
     /// All failures and valid empty results clear out before returning.
     PhysResult    overlapSphereSync(const ayt::math::FVector3& center, float radius,
                                     std::vector<BodyHandle>& out, PhysLayerMask layerMask);
+    /// Current oriented-box overlap through the sync mailbox. Finite center,
+    /// positive finite extents and a nonzero finite quaternion are required.
+    /// Jolt returns body handles; failures clear out.
+    PhysResult    overlapBoxSync(const ayt::math::FVector3& center,
+                                 const ayt::math::FVector3& halfExtents,
+                                 const ayt::math::FQuaternion& rotation,
+                                 std::vector<BodyHandle>& out,
+                                 PhysLayerMask layerMask);
 
     void wakeAll();
     void sleepAll();

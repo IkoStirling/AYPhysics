@@ -27,6 +27,11 @@ public:
                                  float radius,
                                  std::vector<BodyHandle>& out,
                                  PhysLayerMask layerMask) override;
+    PhysResult overlapBoxSync(const ayt::math::FVector3& center,
+                              const ayt::math::FVector3& halfExtents,
+                              const ayt::math::FQuaternion& rotation,
+                              std::vector<BodyHandle>& out,
+                              PhysLayerMask layerMask) override;
 
 private:
     PhysicsManager* _manager = nullptr;

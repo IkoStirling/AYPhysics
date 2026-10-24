@@ -31,6 +31,9 @@ the Host query facade also clears output when it is unbound or stopped, and
 `isReady()` reports false after shutdown. The three legacy 3D async ray,
 sphere-overlap and oriented-box-overlap entries return query ID zero on invalid
 geometry or a stopped manager; accepted results still arrive in a later frame.
+The 3D `overlapBoxSync` query uses the same Jolt oriented-box geometry as its
+async counterpart. It returns body handles for the current physics state,
+clears output on failure, and is exposed through `IPhysicsQuery` for placement.
 The original 2D `raycastSync`, `overlapSphereSync` and `overlapBoxSync` clear
 caller output on errors or misses. They reject non-finite geometry and
 non-positive overlap size before submitting to the physics worker, and return
