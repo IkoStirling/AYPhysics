@@ -33,6 +33,15 @@ public:
                                    RaycastHit& outHit,
                                    PhysLayerMask layerMask = 0xFFFFFFFFu) = 0;
 
+    /// Return the nearest hit except one generation-checked body handle.
+    /// Backends without this query return Unsupported and clear outHit.
+    virtual PhysResult raycastSyncIgnoringBody(const ayt::math::Ray& ray,
+        RaycastHit& outHit, PhysLayerMask layerMask, BodyHandle ignoredBody) {
+        if (ignoredBody == InvalidBodyHandle) return raycastSync(ray, outHit, layerMask);
+        outHit = {};
+        return PhysResult::Unsupported;
+    }
+
     /// Physics-thread sphere cast. Jolt reports exact collider and center travel distance.
     /// Initial penetration reports distance 0; failures clear outHit. Unsupported in Null/Mock/2D.
     virtual PhysResult sphereSweepSync(const SphereSweep&, RaycastHit& outHit) {

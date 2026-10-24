@@ -635,7 +635,7 @@ ColliderHandle JoltBackend3D::colliderFromSubShape(const JPH::BodyID& id, uint32
     return collider;
 }
 
-RaycastHit JoltBackend3D::castRay(const ayt::math::Ray& input, PhysLayerMask mask) {
+RaycastHit JoltBackend3D::castRay(const ayt::math::Ray& input, PhysLayerMask mask, BodyHandle ignoredBody) {
     RaycastHit output{};
     if (!detail::finiteVector(input.origin) || !detail::finiteVector(input.dir)) return output;
     const JPH::Vec3 direction(input.dir.x, input.dir.y, input.dir.z);
@@ -644,7 +644,14 @@ RaycastHit JoltBackend3D::castRay(const ayt::math::Ray& input, PhysLayerMask mas
     const auto ray = makeJoltRayCast(input.origin, input.dir, kRayCastMaxDistance, length);
     JPH::RayCastResult hit;
     QueryLayerFilter filter(mask);
-    if (!_impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit, {}, filter)) return output;
+    struct IgnoredBodyFilter final : JPH::BodyFilter {
+        BodyHandle ignored;
+        explicit IgnoredBodyFilter(BodyHandle value) : ignored(value) {}
+        bool ShouldCollideLocked(const JPH::Body& body) const override {
+            return static_cast<BodyHandle>(body.GetUserData()) != ignored;
+        }
+    } bodyFilter(ignoredBody);
+    if (!_impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray, hit, {}, filter, bodyFilter)) return output;
     output.body = handleFromBodyId(hit.mBodyID);
     output.collider = colliderFromSubShape(hit.mBodyID, hit.mSubShapeID2.GetValue());
     if (!output.body || !output.collider) return {};
@@ -1752,7 +1759,7 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
             !std::isfinite(lengthSq) || lengthSq <= 1.0e-16f) {
             outResponse.status = PhysResult::InvalidParam; return;
         }
-        outResponse.firstHit = castRay(ray, request.layerMask);
+        outResponse.firstHit = castRay(ray, request.layerMask, request.ignoredBody);
         return;
     }
     case SyncQueryType::OverlapSphere:

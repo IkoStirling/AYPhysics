@@ -23,6 +23,14 @@ PhysResult PhysicsQueryAdapter::raycastSync(const ayt::math::Ray& ray,
     return _manager->world3D()->raycastSync(ray, outHit, layerMask);
 }
 
+PhysResult PhysicsQueryAdapter::raycastSyncIgnoringBody(const ayt::math::Ray& ray,
+    RaycastHit& outHit, PhysLayerMask layerMask, BodyHandle ignoredBody)
+{
+    outHit = {};
+    if (!isReady()) return PhysResult::InvalidState;
+    return _manager->world3D()->raycastSync(ray, outHit, layerMask, ignoredBody);
+}
+
 PhysResult PhysicsQueryAdapter::sphereSweepSync(const SphereSweep& sweep, RaycastHit& hit) {
     hit = {};
     if (!isReady()) return PhysResult::InvalidState;

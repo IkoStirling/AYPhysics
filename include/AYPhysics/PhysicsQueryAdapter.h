@@ -18,6 +18,8 @@ public:
     PhysResult raycastSync(const ayt::math::Ray& ray,
                            RaycastHit& outHit,
                            PhysLayerMask layerMask) override;
+    PhysResult raycastSyncIgnoringBody(const ayt::math::Ray& ray,
+        RaycastHit& outHit, PhysLayerMask layerMask, BodyHandle ignoredBody) override;
 
     PhysResult sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit) override;
 

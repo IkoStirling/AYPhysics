@@ -22,6 +22,9 @@ velocity, and publishes the actual traveled feet position after the step.
 See [controller behavior and fixed-step usage](docs/character-controller-3d.md).
 
 Box2D and Jolt raycasts return the body and exact generation-checked collider.
+For 3D sight queries, `IPhysicsQuery::raycastSyncIgnoringBody` excludes one
+generation-checked body and returns the next eligible Jolt hit. Backends without
+the operation return `Unsupported`; the ordinary `raycastSync` keeps its behavior.
 The legacy 3D ray and sphere-overlap queries now reject invalid/non-finite
 geometry before mailbox submission. Sync failures clear their hit/body output;
 the Host query facade also clears output when it is unbound or stopped, and

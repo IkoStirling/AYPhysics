@@ -84,7 +84,7 @@ public:
 
 private:
     ColliderHandle colliderFromSubShape(const JPH::BodyID& id, uint32_t subShape);
-    RaycastHit castRay(const ayt::math::Ray& ray, PhysLayerMask mask);
+    RaycastHit castRay(const ayt::math::Ray& ray, PhysLayerMask mask, BodyHandle ignoredBody);
     void updateCharacters(float dt);
     struct Impl;
     std::unique_ptr<Impl> _impl;

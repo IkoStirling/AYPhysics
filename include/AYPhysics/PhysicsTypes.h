@@ -316,6 +316,7 @@ struct SyncQueryRequest {
     ayt::math::FVector3 boxHalfExtents{};
     ayt::math::FQuaternion boxRotation{};
     PhysLayerMask  layerMask = 0xFFFFFFFFu;
+    BodyHandle ignoredBody = InvalidBodyHandle;
 };
 
 struct SyncQueryResponse {

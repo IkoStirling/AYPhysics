@@ -7,6 +7,26 @@ using namespace ayt::physics;
 using namespace ayt::physics::controller_tests;
 TEST_SUITE(JoltColliderHitTests)
 #if defined(AYPHYSICS_HAS_JOLT)
+TEST_CASE(RaycastCanIgnoreExactlyOneBody) {
+    Scene scene;
+    const auto observer = scene.box({0,0,0.5f},{0.25f,0.25f,0.25f});
+    const auto target = scene.box({0,0,3.0f},{0.25f,0.25f,0.25f});
+    scene.tick();
+    ayt::math::Ray ray{}; ray.dir={0,0,1};
+    RaycastHit hit;
+    PhysicsQueryAdapter query; query.bind(scene.manager.get());
+    accepted(query.raycastSync(ray,hit,1u));
+    CHECK_INT_EQ(hit.body,observer);
+    accepted(query.raycastSyncIgnoringBody(ray,hit,1u,observer));
+    CHECK_TRUE(hit.hit); CHECK_INT_EQ(hit.body,target);
+    accepted(query.raycastSyncIgnoringBody(ray,hit,1u,target));
+    CHECK_TRUE(hit.hit); CHECK_INT_EQ(hit.body,observer);
+    accepted(query.raycastSyncIgnoringBody(ray,hit,0u,observer));
+    CHECK_FALSE(hit.hit);
+    ray.dir={};
+    CHECK_TRUE(query.raycastSyncIgnoringBody(ray,hit,1u,observer)==PhysResult::InvalidParam);
+    CHECK_FALSE(hit.hit);
+}
 TEST_CASE(DebugDrawingTracksRealHitsMissesAndLayerFilters) {
     Scene scene;
     scene.box({0,0,3},{0.5f,0.5f,0.5f});

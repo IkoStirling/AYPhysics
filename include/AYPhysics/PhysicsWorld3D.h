@@ -118,7 +118,8 @@ public:
     /// Configured manager debugDraw records the actual completed query.
     /// Origin and direction must be finite; direction nonzero. It is normalized
     /// internally, max distance 10000 units. Failure and misses clear outHit.
-    PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit, PhysLayerMask layerMask = 0xFFFFFFFFu);
+    PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
+        PhysLayerMask layerMask = 0xFFFFFFFFu, BodyHandle ignoredBody = InvalidBodyHandle);
     /// Finite sphere sweep via the sync mailbox; exact collider and CENTER travel distance.
     /// Zero travel/invalid bounds are rejected. Initial penetration gives distance 0.
     /// Null/Mock return Unsupported; only a successful query returns a hit/no-hit result.

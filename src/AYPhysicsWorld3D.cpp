@@ -500,7 +500,7 @@ uint32_t PhysicsWorld3D::overlapBoxAsync(const ayt::math::FVector3& center,
 }
 
 PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
-                                       PhysLayerMask layerMask) {
+                                       PhysLayerMask layerMask, BodyHandle ignoredBody) {
     outHit = {};
     if (!validRay(ray)) return PhysResult::InvalidParam;
     PhysicsManager* m = _manager;
@@ -512,6 +512,7 @@ PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     req.type = SyncQueryType::Raycast;
     req.requestId = nextQueryId();
     req.layerMask = layerMask;
+    req.ignoredBody = ignoredBody;
     req.ray = ray;
     debug.queryId=req.requestId; debug.layerMask=layerMask;
     SyncQueryResponse resp{};
