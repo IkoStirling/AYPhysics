@@ -36,6 +36,12 @@ PhysResult PhysicsQueryAdapter::sphereSweepSync(const SphereSweep& sweep, Raycas
     if (!isReady()) return PhysResult::InvalidState;
     return _manager->world3D()->sphereSweepSync(sweep,hit);
 }
+PhysResult PhysicsQueryAdapter::raycastAll3DSync(const RaycastAll3D& query,
+    std::vector<RaycastHit>& out) {
+    out.clear();
+    if (!isReady()) return PhysResult::InvalidState;
+    return _manager->world3D()->raycastAll3DSync(query, out);
+}
 PhysResult PhysicsQueryAdapter::overlapSphereSync(const ayt::math::FVector3& center,
                                                   float radius,
                                                   std::vector<BodyHandle>& out,

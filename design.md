@@ -392,6 +392,14 @@ The optional 3D `raycastSyncIgnoringBody` carries one body handle through the
 same synchronous mailbox. Jolt compares that full handle against body user data
 before closest-hit selection, preserving generation identity and exposing the
 next blocker. Unsupported facade implementations fail with a cleared output.
+`raycastAll3DSync` submits a finite segment through the same mailbox. Jolt's
+narrow-phase collector stores at most `maxHits` raw intersections and stops on
+the first excess hit; the worker maps each result to an exact generation-checked
+body/collider, world point and surface normal, then sorts by fraction and stable
+body/subshape identity. Invalid geometry, exhausted result capacity, failed
+mapping and allocation failure publish no partial output. Body-level sensors
+are excluded unless requested; one compound body may yield multiple collider
+hits. This is a geometry query, not a material penetration solver.
 | **All backend internals** | **Physics thread only** | `JPH::PhysicsSystem`, `JPH::BodyInterface`, etc. **never** touched from game thread |
 
 **Query dual-path (locked):**

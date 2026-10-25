@@ -25,6 +25,13 @@ Box2D and Jolt raycasts return the body and exact generation-checked collider.
 For 3D sight queries, `IPhysicsQuery::raycastSyncIgnoringBody` excludes one
 generation-checked body and returns the next eligible Jolt hit. Backends without
 the operation return `Unsupported`; the ordinary `raycastSync` keeps its behavior.
+`IPhysicsQuery::raycastAll3DSync` accepts a finite 3D segment and returns
+distance-ordered exact collider surface hits. It filters target layers,
+optionally excludes sensors and up to 64 generation-checked bodies, and
+rejects a result set larger than `maxHits` without publishing a partial list.
+The segment length is at most 10000 and `maxHits` is 1..1024. This supplies
+ballistic candidates; material resistance, entry/exit thickness and damage
+remain gameplay or a higher-level adapter decision.
 The legacy 3D ray and sphere-overlap queries now reject invalid/non-finite
 geometry before mailbox submission. Sync failures clear their hit/body output;
 the Host query facade also clears output when it is unbound or stopped, and

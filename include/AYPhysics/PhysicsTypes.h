@@ -296,7 +296,17 @@ struct RaycastAll2D {
     bool includeSensors = false;
     uint32_t maxHits = 64u;
 };
-enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D, SphereSweepAll2D, CapsuleSweepAll2D, OrientedBoxSweepAll2D, CapsuleColliderOverlap2D, OrientedBoxColliderOverlap2D };
+/// Finite 3D segment returning ordered surface hits from eligible Jolt colliders.
+/// One collider may contribute more than one surface; this is not a material
+/// penetration or exit-thickness solver.
+struct RaycastAll3D {
+    ayt::math::FVector3 origin{}, displacement{0.0f, 0.0f, 1.0f};
+    PhysLayerMask layerMask = 0xFFFFFFFFu;
+    std::vector<BodyHandle> ignoredBodies;
+    bool includeSensors = false;
+    uint32_t maxHits = 64u;
+};
+enum class SyncQueryType : uint8_t { Raycast, OverlapSphere, OverlapBox, SphereSweep, BoxSweep2D, CapsuleSweep2D, CapsuleOverlap2D, OrientedBoxOverlap2D, RaycastAll2D, OrientedBoxSweep2D, BoxSweepAll2D, SphereSweepAll2D, CapsuleSweepAll2D, OrientedBoxSweepAll2D, CapsuleColliderOverlap2D, OrientedBoxColliderOverlap2D, RaycastAll3D };
 
 struct SyncQueryRequest {
     SyncQueryType type = SyncQueryType::Raycast;
@@ -309,6 +319,7 @@ struct SyncQueryRequest {
     OrientedBoxOverlap2D orientedBoxOverlap2D{};
     OrientedBoxSweep2D orientedBoxSweep2D{};
     RaycastAll2D raycastAll2D{};
+    RaycastAll3D raycastAll3D{};
     ayt::math::Ray     ray{};
     ayt::math::FVector3 sphereCenter{};
     float             sphereRadius = 0.0f;

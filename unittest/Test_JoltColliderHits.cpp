@@ -27,6 +27,80 @@ TEST_CASE(RaycastCanIgnoreExactlyOneBody) {
     CHECK_TRUE(query.raycastSyncIgnoringBody(ray,hit,1u,observer)==PhysResult::InvalidParam);
     CHECK_FALSE(hit.hit);
 }
+TEST_CASE(FiniteMultiHitRayOrdersAndBoundsColliderResults) {
+    Scene scene;
+    const auto nearBody = scene.box({0,0,2.0f},{0.25f,0.25f,0.25f});
+    const auto farBody = scene.box({0,0,4.0f},{0.25f,0.25f,0.25f});
+    scene.tick();
+    PhysicsQueryAdapter facade; facade.bind(scene.manager.get());
+    RaycastAll3D query;
+    query.origin = {0,0,0};
+    query.displacement = {0,0,6};
+    query.layerMask = 1u;
+    std::vector<RaycastHit> hits;
+    accepted(facade.raycastAll3DSync(query, hits));
+    CHECK_INT_EQ(hits.size(), 2u);
+    CHECK_INT_EQ(hits[0].body, nearBody);
+    CHECK_INT_EQ(hits[1].body, farBody);
+    CHECK_TRUE(hits[0].collider != InvalidColliderHandle);
+    CHECK_TRUE(hits[1].collider != InvalidColliderHandle);
+    CHECK_TRUE(hits[0].distance < hits[1].distance);
+    CHECK_TRUE(std::abs(hits[0].distance - 1.75f) < 0.01f);
+    CHECK_TRUE(std::abs(hits[1].distance - 3.75f) < 0.01f);
+    CHECK_TRUE(hits[0].normal.z < -0.99f);
+
+    query.ignoredBodies.push_back(nearBody);
+    accepted(facade.raycastAll3DSync(query, hits));
+    CHECK_INT_EQ(hits.size(), 1u);
+    CHECK_INT_EQ(hits[0].body, farBody);
+    query.ignoredBodies.clear();
+    query.maxHits = 1;
+    CHECK_TRUE(facade.raycastAll3DSync(query, hits) == PhysResult::OutOfRange);
+    CHECK_TRUE(hits.empty());
+    query.maxHits = 64;
+    query.layerMask = 0;
+    accepted(facade.raycastAll3DSync(query, hits));
+    CHECK_TRUE(hits.empty());
+    query.displacement = {};
+    CHECK_TRUE(facade.raycastAll3DSync(query, hits) == PhysResult::InvalidParam);
+    CHECK_TRUE(hits.empty());
+}
+TEST_CASE(FiniteMultiHitRayPreservesCompoundPartsAndSensorPolicy) {
+    Scene scene;
+    RigidbodyDesc bodyDesc;
+    bodyDesc.type = BodyType::Static;
+    BodyHandle compound;
+    accepted(scene.world->createRigidbody(bodyDesc, compound));
+    ColliderDesc part;
+    part.body = compound;
+    part.halfExtents = {0.25f,0.25f,0.25f};
+    part.offset = {0,0,2};
+    ColliderHandle front, rear;
+    accepted(scene.world->createCollider(part, front));
+    part.offset = {0,0,4};
+    accepted(scene.world->createCollider(part, rear));
+    const auto sensor = scene.box({0,0,3}, {0.2f,0.2f,0.2f},
+        0, 0, true);
+    scene.tick();
+    PhysicsQueryAdapter facade; facade.bind(scene.manager.get());
+    RaycastAll3D query;
+    query.origin = {0,0,0};
+    query.displacement = {0,0,6};
+    query.layerMask = 1u;
+    std::vector<RaycastHit> hits;
+    accepted(facade.raycastAll3DSync(query, hits));
+    CHECK_INT_EQ(hits.size(), 2u);
+    CHECK_INT_EQ(hits[0].body, compound);
+    CHECK_INT_EQ(hits[0].collider, front);
+    CHECK_INT_EQ(hits[1].body, compound);
+    CHECK_INT_EQ(hits[1].collider, rear);
+    query.includeSensors = true;
+    accepted(facade.raycastAll3DSync(query, hits));
+    CHECK_INT_EQ(hits.size(), 3u);
+    CHECK_INT_EQ(hits[1].body, sensor);
+    CHECK_TRUE(hits[0].distance < hits[1].distance
+        && hits[1].distance < hits[2].distance);
+}
 TEST_CASE(SynchronousOrientedBoxOverlapUsesActualFootprint) {
     Scene scene;
     const auto nearby = scene.box({0,1.2f,0},{0.2f,0.2f,0.2f});

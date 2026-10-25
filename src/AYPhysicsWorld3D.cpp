@@ -1,5 +1,6 @@
 #include "AYPhysics/PhysicsWorld3D.h"
 #include <cmath>
+#include <new>
 
 #include "AYPhysics/PhysicsManager.h"
 
@@ -523,6 +524,40 @@ PhysResult PhysicsWorld3D::raycastSync(const ayt::math::Ray& ray, RaycastHit& ou
     if (resp.status == PhysResult::Ok) outHit = resp.firstHit;
     (void)m->debugDraw().record(debug, resp.status, outHit.hit, &outHit);
     return resp.status;
+}
+
+PhysResult PhysicsWorld3D::raycastAll3DSync(const RaycastAll3D& query,
+    std::vector<RaycastHit>& out) {
+    out.clear();
+    try {
+        const auto finite = [](const auto& value) {
+            return std::isfinite(value.x) && std::isfinite(value.y)
+                && std::isfinite(value.z);
+        };
+        const float lengthSq = query.displacement.lengthSq();
+        if (!finite(query.origin) || !finite(query.displacement)
+            || !std::isfinite(lengthSq) || lengthSq < 1.0e-12f
+            || lengthSq > 10000.0f * 10000.0f
+            || query.ignoredBodies.size() > 64u
+            || query.maxHits == 0u || query.maxHits > 1024u)
+            return PhysResult::InvalidParam;
+        auto* manager = _manager;
+        if (!manager || !manager->isRunning() || !manager->syncMailbox())
+            return PhysResult::InvalidState;
+        SyncQueryRequest request{};
+        request.type = SyncQueryType::RaycastAll3D;
+        request.requestId = nextQueryId();
+        request.raycastAll3D = query;
+        SyncQueryResponse response{};
+        if (!manager->syncMailbox()->submitAndWait(request, response, 1000 * 1000))
+            return PhysResult::BackendError;
+        if (response.status == PhysResult::Ok)
+            out = std::move(response.rayHits);
+        return response.status;
+    } catch (const std::bad_alloc&) {
+        out.clear();
+        return PhysResult::NoMemory;
+    }
 }
 
 PhysResult PhysicsWorld3D::sphereSweepSync(const SphereSweep& sweep, RaycastHit& outHit) {

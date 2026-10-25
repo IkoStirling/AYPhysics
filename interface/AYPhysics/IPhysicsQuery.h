@@ -42,6 +42,14 @@ public:
         return PhysResult::Unsupported;
     }
 
+    /// Ordered hits on a finite 3D segment. OutOfRange means more than maxHits
+    /// were found; the output is cleared rather than silently truncated.
+    /// Null/Mock/2D backends return Unsupported and clear out.
+    virtual PhysResult raycastAll3DSync(const RaycastAll3D&,
+        std::vector<RaycastHit>& out) {
+        out.clear(); return PhysResult::Unsupported;
+    }
+
     /// Physics-thread sphere cast. Jolt reports exact collider and center travel distance.
     /// Initial penetration reports distance 0; failures clear outHit. Unsupported in Null/Mock/2D.
     virtual PhysResult sphereSweepSync(const SphereSweep&, RaycastHit& outHit) {

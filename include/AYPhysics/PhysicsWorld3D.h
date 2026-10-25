@@ -120,6 +120,10 @@ public:
     /// internally, max distance 10000 units. Failure and misses clear outHit.
     PhysResult    raycastSync(const ayt::math::Ray& ray, RaycastHit& outHit,
         PhysLayerMask layerMask = 0xFFFFFFFFu, BodyHandle ignoredBody = InvalidBodyHandle);
+    /// Finite multi-hit segment. Valid limits: length (0,10000], maxHits
+    /// [1,1024], at most 64 ignored bodies. Failure clears out.
+    PhysResult raycastAll3DSync(const RaycastAll3D& query,
+        std::vector<RaycastHit>& out);
     /// Finite sphere sweep via the sync mailbox; exact collider and CENTER travel distance.
     /// Zero travel/invalid bounds are rejected. Initial penetration gives distance 0.
     /// Null/Mock return Unsupported; only a successful query returns a hit/no-hit result.

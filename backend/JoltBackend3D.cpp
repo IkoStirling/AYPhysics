@@ -1762,6 +1762,103 @@ void JoltBackend3D::executeSync(const SyncQueryRequest& request,
         outResponse.firstHit = castRay(ray, request.layerMask, request.ignoredBody);
         return;
     }
+    case SyncQueryType::RaycastAll3D: {
+        const auto& query = request.raycastAll3D;
+        const float lengthSq = query.displacement.x * query.displacement.x
+            + query.displacement.y * query.displacement.y
+            + query.displacement.z * query.displacement.z;
+        if (!detail::finiteVector(query.origin)
+            || !detail::finiteVector(query.displacement)
+            || !std::isfinite(lengthSq) || lengthSq < 1.0e-12f
+            || lengthSq > kRayCastMaxDistance * kRayCastMaxDistance
+            || query.ignoredBodies.size() > 64u
+            || query.maxHits == 0u || query.maxHits > 1024u) {
+            outResponse.status = PhysResult::InvalidParam;
+            return;
+        }
+        struct Filter final : JPH::BodyFilter {
+            const RaycastAll3D& query;
+            explicit Filter(const RaycastAll3D& value) : query(value) {}
+            bool ShouldCollideLocked(const JPH::Body& body) const override {
+                if (!query.includeSensors && body.IsSensor()) return false;
+                const auto handle = static_cast<BodyHandle>(body.GetUserData());
+                return std::find(query.ignoredBodies.begin(),
+                    query.ignoredBodies.end(), handle)
+                    == query.ignoredBodies.end();
+            }
+        } bodyFilter(query);
+        struct Collector final : JPH::CastRayCollector {
+            std::vector<JPH::RayCastResult> hits;
+            uint32_t limit = 0;
+            bool overflow = false;
+            void AddHit(const JPH::RayCastResult& hit) override {
+                if (hits.size() == limit) {
+                    overflow = true;
+                    ForceEarlyOut();
+                    return;
+                }
+                hits.push_back(hit);
+            }
+        } collector;
+        try {
+            collector.limit = query.maxHits;
+            collector.hits.reserve(static_cast<std::size_t>(query.maxHits) + 1u);
+            const JPH::RRayCast ray(
+                JPH::RVec3(query.origin.x, query.origin.y, query.origin.z),
+                JPH::Vec3(query.displacement.x, query.displacement.y,
+                    query.displacement.z));
+            QueryLayerFilter layerFilter(query.layerMask);
+            _impl->physicsSystem->GetNarrowPhaseQuery().CastRay(ray,
+                JPH::RayCastSettings{}, collector, {}, layerFilter, bodyFilter);
+            if (collector.overflow) {
+                outResponse.status = PhysResult::OutOfRange;
+                return;
+            }
+            std::sort(collector.hits.begin(), collector.hits.end(),
+                [](const auto& left, const auto& right) {
+                    if (left.mFraction != right.mFraction)
+                        return left.mFraction < right.mFraction;
+                    if (left.mBodyID != right.mBodyID)
+                        return left.mBodyID.GetIndexAndSequenceNumber()
+                            < right.mBodyID.GetIndexAndSequenceNumber();
+                    return left.mSubShapeID2.GetValue()
+                        < right.mSubShapeID2.GetValue();
+                });
+            outResponse.rayHits.reserve(collector.hits.size());
+            const float length = std::sqrt(lengthSq);
+            for (const auto& result : collector.hits) {
+                RaycastHit hit;
+                hit.body = handleFromBodyId(result.mBodyID);
+                hit.collider = colliderFromSubShape(result.mBodyID,
+                    result.mSubShapeID2.GetValue());
+                if (!hit.body || !hit.collider) {
+                    outResponse.rayHits.clear();
+                    outResponse.status = PhysResult::BackendError;
+                    return;
+                }
+                const auto point = ray.GetPointOnRay(result.mFraction);
+                JPH::BodyLockRead lock(_impl->physicsSystem->GetBodyLockInterface(),
+                    result.mBodyID);
+                if (!lock.Succeeded()) {
+                    outResponse.rayHits.clear();
+                    outResponse.status = PhysResult::BackendError;
+                    return;
+                }
+                const auto normal = lock.GetBody().GetWorldSpaceSurfaceNormal(
+                    result.mSubShapeID2, point);
+                hit.hit = true;
+                hit.point = {static_cast<float>(point.GetX()),
+                    static_cast<float>(point.GetY()), static_cast<float>(point.GetZ())};
+                hit.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+                hit.distance = result.mFraction * length;
+                outResponse.rayHits.push_back(hit);
+            }
+        } catch (const std::bad_alloc&) {
+            outResponse.rayHits.clear();
+            outResponse.status = PhysResult::NoMemory;
+        }
+        return;
+    }
     case SyncQueryType::OverlapSphere:
     case SyncQueryType::OverlapBox: {
         ColliderDesc desc; const bool sphere=request.type==SyncQueryType::OverlapSphere;
