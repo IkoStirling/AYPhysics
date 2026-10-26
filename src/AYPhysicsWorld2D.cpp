@@ -91,6 +91,35 @@ PhysResult PhysicsWorld2D::setRigidbodyTransform(BodyHandle h, const ayt::math::
     return PhysResult::Ok;
 }
 
+PhysResult PhysicsWorld2D::transferRigidbody(BodyHandle h,
+    const ayt::math::FVector3& position, float angleRadians,
+    const ayt::math::FVector3& linearVelocity, float angularVelocity,
+    PhysLayer layer, PhysLayerMask collideMask) {
+    PhysicsManager* m = _manager;
+    if (!m || !m->isRunning() || !m->commandQueue2D() || !m->createPool())
+        return PhysResult::InvalidState;
+    if (!isValidHandle(h) || !std::isfinite(position.x) || !std::isfinite(position.y)
+        || !std::isfinite(position.z) || !std::isfinite(angleRadians)
+        || !std::isfinite(linearVelocity.x) || !std::isfinite(linearVelocity.y)
+        || !std::isfinite(linearVelocity.z) || !std::isfinite(angularVelocity)
+        || layer >= 32) return PhysResult::InvalidParam;
+    PhysicsCreatePayload payload{};
+    payload.kind = PhysicsCreatePayload::Kind::BodyTransfer2D;
+    payload.bodyTransfer2D = {position, linearVelocity, angleRadians,
+                              angularVelocity, layer, collideMask};
+    const CreateSlotId slot = m->createPool()->allocate(payload);
+    if (slot == InvalidCreateSlotId) return PhysResult::NoMemory;
+    PhysicsCommand cmd{};
+    cmd.type = PhysicsCommandType::TransferRigidbody2D;
+    cmd.body = h;
+    cmd.createSlot = slot;
+    if (!m->commandQueue2D()->tryPush(cmd)) {
+        (void)m->createPool()->take(slot, payload);
+        return PhysResult::QueueFull;
+    }
+    return PhysResult::Ok;
+}
+
 PhysResult PhysicsWorld2D::applyForce(BodyHandle h, const ayt::math::FVector3& f) {
     PhysicsManager* m = _manager;
     if (!m || !m->commandQueue2D()) return PhysResult::InvalidState;

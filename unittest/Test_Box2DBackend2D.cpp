@@ -40,6 +40,57 @@ TEST_SUITE(Box2DBackend2DTests)
         backend.stop();
     }
 
+    TEST_CASE(Real_TransferBodyPublishesOnePoseVelocityAndRoute) {
+        Box2DBackend2D backend;
+        PhysicsBackendDescriptor desc;
+        desc.maxBodies = 32u;
+        desc.gravity2D = {0.0f, 0.0f};
+        CHECK(backend.init2D(desc));
+        CHECK(backend.start(backend.describe()));
+        RigidbodyDesc bodyDesc{};
+        bodyDesc.type = BodyType::Dynamic;
+        bodyDesc.alwaysSync = true;
+        BodyHandle body = InvalidBodyHandle;
+        CHECK(backend.execute_createRigidbodyForTest(bodyDesc, body) == PhysResult::Ok);
+        PhysicsCommand command{};
+        command.type = PhysicsCommandType::TransferRigidbody2D;
+        command.body = body;
+        PhysicsCreatePayload payload{};
+        payload.kind = PhysicsCreatePayload::Kind::BodyTransfer2D;
+        payload.bodyTransfer2D = {{9.0f, 7.0f, 0.0f}, {2.0f, 3.0f, 0.0f},
+                                  1.5707963f, 0.25f, 4u, 1u << 4};
+        backend.execute(command, &payload);
+        PhysFrameSnapshot snapshot{};
+        backend.publishSnapshot(snapshot);
+        CHECK(snapshot.transforms.size() == 1u);
+        if (snapshot.transforms.size() == 1u) {
+            const auto& state = snapshot.transforms.front();
+            CHECK_FLOAT_EQ(state.position.x, 9.0f, 1e-4f);
+            CHECK_FLOAT_EQ(state.position.y, 7.0f, 1e-4f);
+            CHECK_FLOAT_EQ(state.linearVelocity.x, 2.0f, 1e-4f);
+            CHECK_FLOAT_EQ(state.linearVelocity.y, 3.0f, 1e-4f);
+            CHECK_FLOAT_EQ(state.angularVelocity.z, 0.25f, 1e-4f);
+        }
+        backend.stop();
+    }
+
+    TEST_CASE(Real_TransferBodyRejectsInvalidInputBeforeQueue) {
+        auto mgr = makeBox2DMgr();
+        auto* world = mgr->world2D();
+        BodyHandle body = InvalidBodyHandle;
+        RigidbodyDesc desc{};
+        CHECK(world->createRigidbody(desc, body) == PhysResult::Ok);
+        CHECK(world->transferRigidbody(body, {},
+            std::numeric_limits<float>::infinity(), {}, 0.0f, 0, ~0u)
+            == PhysResult::InvalidParam);
+        CHECK(world->transferRigidbody(body, {}, 0.0f, {}, 0.0f, 32, ~0u)
+            == PhysResult::InvalidParam);
+        CHECK(world->transferRigidbody(body, {5.0f, 6.0f, 0.0f}, 0.0f,
+            {1.0f, 0.0f, 0.0f}, 0.0f, 1, 1u << 1) == PhysResult::Ok);
+        CHECK(mgr->stepAndWait(1.0f / 60.0f) == PhysResult::Ok);
+        mgr->shutdown();
+    }
+
     TEST_CASE(Real_DynamicBoxFallsUnderGravity) {
         Box2DBackend2D backend;
         PhysicsBackendDescriptor desc;

@@ -19,6 +19,13 @@ public:
     PhysResult destroyRigidbody(BodyHandle h);
     PhysResult setRigidbodyTransform(BodyHandle h, const ayt::math::FVector3& p,
                                      const ayt::math::FQuaternion& r);
+    /** Queue one Box2D worker transition of pose, both velocities and collision
+     * route. Rejection leaves the body untouched; accepted commands apply at
+     * the next physics boundary. This does not move an Entity or change room
+     * ownership, which the caller must publish at the same game tick. */
+    PhysResult transferRigidbody(BodyHandle h, const ayt::math::FVector3& position,
+        float angleRadians, const ayt::math::FVector3& linearVelocity,
+        float angularVelocity, PhysLayer layer, PhysLayerMask collideMask);
     PhysResult applyForce(BodyHandle h, const ayt::math::FVector3& f);
     PhysResult applyImpulse(BodyHandle h, const ayt::math::FVector3& impulse,
                             const ayt::math::FVector3& point);

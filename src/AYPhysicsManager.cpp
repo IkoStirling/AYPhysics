@@ -307,7 +307,8 @@ void PhysicsManager::_physicsThreadMain() {
             const PhysicsCreatePayload* pPayload = nullptr;
             if (cmd.type == PhysicsCommandType::CreateRigidbody ||
                 cmd.type == PhysicsCommandType::CreateCollider ||
-                cmd.type == PhysicsCommandType::CreateJoint) {
+                cmd.type == PhysicsCommandType::CreateJoint ||
+                cmd.type == PhysicsCommandType::TransferRigidbody2D) {
                 if (cmd.createSlot != InvalidCreateSlotId &&
                     _createPool->take(cmd.createSlot, payload)) {
                     pPayload = &payload;

@@ -1611,3 +1611,11 @@ selection. Default all-bit masks preserve previous direct callers. Sources
 remain game-thread catalog values; AYEntity's Spatial authoring owns automatic
 fixed-step collection, not AYPhysics. The 64-source cap and axis-aligned Box
 contract are unchanged.
+
+## 2D body transfer command (2026-10-26)
+
+The Box2D queue now accepts `TransferRigidbody2D` with one out-of-band payload.
+Validation occurs before allocation and enqueue. The worker checks the body
+generation once, then updates shape filters, pose and both velocities without
+intervening simulation steps. Queue rejection releases the pool slot. The
+command is a native physics boundary, not an Entity/World transaction.

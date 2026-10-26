@@ -523,6 +523,38 @@ void Box2DBackend2D::execute(const PhysicsCommand& cmd,
         return;
     }
 
+    case CT::TransferRigidbody2D: {
+        if (!createPayload || createPayload->kind != PhysicsCreatePayload::Kind::BodyTransfer2D) {
+            ++_invalidParamCount;
+            return;
+        }
+        const uint32_t idx = handleIndex(cmd.body);
+        if (idx == 0u || idx >= _impl->maxBodies ||
+            _impl->bodyGeneration[idx] != handleGeneration(cmd.body)) {
+            ++_notFoundCount;
+            return;
+        }
+        const b2BodyId id = _impl->bodyIdByIndex[idx];
+        if (!b2Body_IsValid(id)) { ++_notFoundCount; return; }
+        const auto& transfer = createPayload->bodyTransfer2D;
+        _impl->bodyLayer[idx] = transfer.layer;
+        _impl->bodyCollideMask[idx] = transfer.collideMask;
+        const b2Filter filter = makeB2Filter(transfer.layer, transfer.collideMask);
+        for (uint32_t sIdx = 1u; sIdx < _impl->maxBodies; ++sIdx) {
+            const b2ShapeId shapeId = _impl->shapeIdByIndex[sIdx];
+            if (b2Shape_IsValid(shapeId) && B2_ID_EQUALS(b2Shape_GetBody(shapeId), id))
+                b2Shape_SetFilter(shapeId, filter);
+        }
+        b2Body_SetTransform(id, b2Vec2{transfer.position.x, transfer.position.y},
+                            b2MakeRot(transfer.angleRadians));
+        _impl->desiredVelocity[idx] = transfer.linearVelocity;
+        b2Body_SetLinearVelocity(id, b2Vec2{transfer.linearVelocity.x,
+                                            transfer.linearVelocity.y});
+        b2Body_SetAngularVelocity(id, transfer.angularVelocity);
+        b2Body_SetAwake(id, true);
+        return;
+    }
+
     case CT::SetRigidbodyCollideMask: {
         // P3: update the per-body collide mask and re-apply it to every shape
         // currently attached to the body (so existing colliders pick up the new

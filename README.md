@@ -316,3 +316,10 @@ Spatial gravity sources now support channel masks. `GravityField3D::sample`
 filters matching receiver channels before source priority selection; default
 masks preserve existing callers. Scene-authored Spatial gravity is integrated
 by AYEntity; see `docs/spatial-gravity-3d.md`.
+
+## 2D 原子物理体转移
+
+`PhysicsWorld2D::transferRigidbody` 将位置、角度、线速度、角速度、碰撞层和掩码
+放入一条物理工作线程命令。无效输入或入队失败不改变物理体；成功入队后在下一次
+物理边界应用。适合已验证的空间连接穿越。Entity 房间归属仍由调用方在同一游戏
+tick 发布；异步命令不能替游戏保证目标区域一直驻留。
